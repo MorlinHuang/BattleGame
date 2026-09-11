@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>查手机 v5 · 拉扯互掷 鬼畜新方向</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #14161a;
+    color: #e8e8e8;
+    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    padding: 32px 20px 60px;
+  }
+  h1 { text-align: center; font-size: 22px; margin-bottom: 6px; }
+  .sub { text-align: center; color: #8a8f98; font-size: 13px; margin-bottom: 32px; }
+  .mech {
+    max-width: 900px;
+    margin: 0 auto 36px;
+    background: #1d2025;
+    border: 1px solid #2a2e35;
+    border-radius: 12px;
+    padding: 18px 22px;
+    font-size: 13px;
+    color: #b0b6bf;
+    line-height: 1.9;
+  }
+  .mech b { color: #ffd166; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .card {
+    background: #1d2025;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid #2a2e35;
+  }
+  .card .imgwrap {
+    background: #0d0e11;
+    display: flex;
+    justify-content: center;
+    padding: 12px 12px 0;
+  }
+  .card img {
+    width: 100%;
+    max-width: 400px;
+    display: block;
+    border-radius: 8px;
+    cursor: zoom-in;
+  }
+  .card .info { padding: 14px 16px 18px; }
+  .card .tag { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .card .tag .plan { color: #ffd166; }
+  .card .desc { font-size: 13px; color: #b0b6bf; line-height: 1.7; }
+  .card .rec { margin-top: 8px; font-size: 12px; color: #7ed957; font-weight: 600; }
+  .card .note { margin-top: 8px; font-size: 12px; color: #8a8f98; }
+  .lightbox {
+    position: fixed; inset: 0; background: rgba(0,0,0,.92);
+    display: none; align-items: center; justify-content: center; z-index: 9;
+    cursor: zoom-out;
+  }
+  .lightbox img { max-width: 94vw; max-height: 94vh; }
+  .lightbox.on { display: flex; }
+</style>
+</head>
+<body>
+  <h1>查手机 v5 · 拉扯互掷 —— 鬼畜新方向</h1>
+  <div class="sub">960×1334 · 纯2D · 点击任意图可放大</div>
+
+  <div class="mech">
+    <b>玩法转译:</b>手机不再是固定的中缝,而是被<b>双方各拽一端来回拉扯,手机的位移本身=对抗线/进度条</b>。
+    弹幕礼物→对应阵营角色<b>扔生活物品</b>砸对方,砸中手机就往自己这边拉。女方(查岗党)武器:
+    拖鞋/键盘/榴莲/口红;男方(灭迹党)武器:臭袜子/鼠标/篮球/啤酒瓶。<b>生活场景夸张鬼畜化</b>。
+    角色造型延续侦探(查)/清理员(灭),画面上只出现「查岗党/灭迹党」,不写男/女字样。
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="imgwrap"><img src="v5_1_laqian.png" alt="定场拉锯"></div>
+      <div class="info">
+        <div class="tag"><span class="plan">图1 · 定场拉锯</span> — 拉扯=对抗线的骨架 ⭐</div>
+        <div class="desc">中央手机被左右后仰死拽,倾斜闪屏裂纹。双角色咬牙流汗爆青筋,「给我看!」vs「别看了!!」。手机聊天对白模型自创且极贴题材:左「在干嘛呀/和谁在一起/发个位置呗/我有点不放心...」右「在忙别问了/就我一个人/在加班/别查了...」。背景线索清单(聊天记录/位置轨迹/消费记录/可疑联系人)vs「没有证据!!」「眼不见心不烦」。</div>
+        <div class="rec">主视觉推荐</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="imgwrap"><img src="v5_2_huzhi.png" alt="技能互掷"></div>
+      <div class="info">
+        <div class="tag"><span class="plan">图2 · 技能互掷</span> — 礼物技能的表现</div>
+        <div class="desc">查岗党举巨大榴莲砸,灭迹党坐地举发霉臭袜子+冒烟啤酒瓶防御,进度 85% vs 20%。墙画「家是/战场/也是爱」鬼畜点题。底部绿红手扯手机+闪电线。</div>
+        <div class="note">角色与手分上下两区,量产时合并为"角色身体连着拽手机的手"。</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="imgwrap"><img src="v5_3_hunzhan.png" alt="混战鬼畜"></div>
+      <div class="info">
+        <div class="tag"><span class="plan">图3 · 混战鬼畜</span> — 全物品乱飞 ⭐</div>
+        <div class="desc">女武器(粉兔拖鞋/口红/榴莲)男武器(臭袜/鼠标/啤酒瓶/篮球)全数在空中+左右弹药堆,手机被双巨手扯得闪屏,猫张嘴惊叫,客厅狼藉,爆炸闪电冲击线拉满。弹药堆设计=礼物面板的视觉原型。</div>
+        <div class="rec">节目效果最足</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="lightbox" id="lb"><img id="lbimg" src=""></div>
+  <script>
+    document.querySelectorAll('.card img').forEach(img => {
+      img.addEventListener('click', () => {
+        document.getElementById('lbimg').src = img.src;
+        document.getElementById('lb').classList.add('on');
+      });
+    });
+    document.getElementById('lb').addEventListener('click', e => {
+      e.currentTarget.classList.remove('on');
+    });
+  </script>
+</body>
+</html>

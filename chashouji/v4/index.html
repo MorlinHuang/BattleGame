@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>查手机 v4 · 砍角色 vs 留角色 构图对比</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #14161a;
+    color: #e8e8e8;
+    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    padding: 32px 20px 60px;
+  }
+  h1 { text-align: center; font-size: 22px; margin-bottom: 6px; }
+  .sub { text-align: center; color: #8a8f98; font-size: 13px; margin-bottom: 32px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .card {
+    background: #1d2025;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid #2a2e35;
+  }
+  .card .imgwrap {
+    background: #0d0e11;
+    display: flex;
+    justify-content: center;
+    padding: 12px 12px 0;
+  }
+  .card img {
+    width: 100%;
+    max-width: 400px;
+    display: block;
+    border-radius: 8px;
+    cursor: zoom-in;
+  }
+  .card .info { padding: 14px 16px 18px; }
+  .card .tag { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .card .tag .plan { color: #ffd166; }
+  .card .desc { font-size: 13px; color: #b0b6bf; line-height: 1.7; }
+  .card .rec { margin-top: 8px; font-size: 12px; color: #7ed957; font-weight: 600; }
+  .card .note { margin-top: 8px; font-size: 12px; color: #8a8f98; }
+  .sec {
+    max-width: 1200px;
+    margin: 40px auto 12px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #ffd166;
+    border-bottom: 1px solid #2a2e35;
+    padding-bottom: 8px;
+  }
+  .lightbox {
+    position: fixed; inset: 0; background: rgba(0,0,0,.92);
+    display: none; align-items: center; justify-content: center; z-index: 9;
+    cursor: zoom-out;
+  }
+  .lightbox img { max-width: 94vw; max-height: 94vh; }
+  .lightbox.on { display: flex; }
+</style>
+</head>
+<body>
+  <h1>查手机 v4 · 砍角色 vs 留角色 —— 构图对比</h1>
+  <div class="sub">960×1334 · 纯2D · 点击任意图可放大</div>
+
+  <div class="sec">A 类 · 砍掉角色,换成更简单元素</div>
+  <div class="grid">
+    <div class="card">
+      <div class="imgwrap"><img src="v4_A_hand.png" alt="A1 双手抢屏"></div>
+      <div class="info">
+        <div class="tag"><span class="plan">A1 · 双手抢屏</span> — 角色最小化为一双手 ⭐</div>
+        <div class="desc">整屏手机,中缝=对抗线。无角色无脸,只有两只手从屏边伸入掰手机,左手偏绿右手偏红。观众看到的是"自己的手"在抢一部手机,第一人称代入最强。手=推线动作本身,概念上最纯。</div>
+        <div class="rec">砍角色方向首选</div>
+        <div class="note">本次生成手部偏弱(画成边缘拳头),量产时手是切件动画,不受影响。</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="imgwrap"><img src="v4_A_tools.png" alt="A2 工具对峙"></div>
+      <div class="info">
+        <div class="tag"><span class="plan">A2 · 工具对峙</span> — 放大镜 vs 橡皮擦</div>
+        <div class="desc">无角色无手,阵营由拟物代表:左绿放大镜(查),右红橡皮擦(灭)。镜片里映着聊天内容="查"的具象,擦过留焦痕="灭"的具象。一眼能喊出口,最省美术成本。</div>
+        <div class="note">本次生成工具落在底部两侧且略有遮挡,量产时位置程序可控。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">B 类 · 不砍角色,重新构图</div>
+  <div class="grid">
+    <div class="card">
+      <div class="imgwrap"><img src="v4_B_inside.png" alt="B1 屏内对峙"></div>
+      <div class="info">
+        <div class="tag"><span class="plan">B1 · 屏内对峙</span> — 角色走进手机屏幕里</div>
+        <div class="desc">整屏手机,屏内即舞台:Q版侦探(绿,帽+放大镜)与清理员(红,兜帽+墨镜+橡皮擦)站在聊天记录之间隔中缝对峙。聊天被分到上下两段,代入感=看屏幕里的"小剧场"。</div>
+        <div class="note">概念最激进:角色=屏幕内容的一部分,手机屏=世界。聊天环绕角色排布,量产需调。</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="imgwrap"><img src="v4_B_side.png" alt="B2 两翼立绘"></div>
+      <div class="info">
+        <div class="tag"><span class="plan">B2 · 两翼立绘</span> — 手机居中,角色归位两翼 ⭐</div>
+        <div class="desc">回到螂人杀/龙王式构图:角色回左右两翼(侦探vs清理员)朝手机对峙,手机居中当战场,中缝=对抗线。三元素主次分明:角色(大)→手机(战场)→聊天(内容)。模型自创直播弹幕氛围:「快查!」「支持查岗!」「赶紧删!!」「灭迹成功!」+ 观众荧光棒剪影。</div>
+        <div class="rec">留角色方向首选</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="lightbox" id="lb"><img id="lbimg" src=""></div>
+  <script>
+    document.querySelectorAll('.card img').forEach(img => {
+      img.addEventListener('click', () => {
+        document.getElementById('lbimg').src = img.src;
+        document.getElementById('lb').classList.add('on');
+      });
+    });
+    document.getElementById('lb').addEventListener('click', e => {
+      e.currentTarget.classList.remove('on');
+    });
+  </script>
+</body>
+</html>

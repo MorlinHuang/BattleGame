@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>查手机 · 对抗线原型 v1</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0e1013;color:#e8eaee;font:14px/1.6 "Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+     display:flex;gap:18px;padding:18px;align-items:flex-start;flex-wrap:wrap}
+#stage{position:relative;background:#000;border-radius:10px;overflow:hidden;
+       box-shadow:0 10px 40px rgba(0,0,0,.6);flex:0 0 auto}
+canvas{display:block;width:min(52vw,480px);height:auto;cursor:crosshair}
+#panel{flex:1 1 320px;min-width:320px;max-width:520px}
+h1{font-size:17px;color:#ffd166;margin-bottom:2px}
+.sub{color:#7b8290;font-size:12px;margin-bottom:14px}
+.card{background:#1a1d22;border:1px solid #2a2e35;border-radius:9px;padding:12px 14px;margin-bottom:10px}
+.card h2{font-size:13px;color:#ffd166;margin-bottom:9px;font-weight:700}
+.row{display:flex;align-items:center;gap:8px;margin:7px 0;flex-wrap:wrap}
+.row label{flex:0 0 96px;color:#9aa2ae;font-size:12px}
+input[type=range]{flex:1;min-width:120px;accent-color:#ffd166}
+.val{flex:0 0 58px;text-align:right;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#7ed957}
+button{background:#252a31;color:#d6dae1;border:1px solid #363c45;border-radius:6px;
+       padding:5px 11px;cursor:pointer;font-size:12px;font-family:inherit}
+button:hover{background:#2f353d}
+button.on{background:#ffd166;color:#1a1d22;border-color:#ffd166;font-weight:700}
+.seg{display:flex;gap:5px;flex-wrap:wrap}
+table{width:100%;border-collapse:collapse;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+td{padding:2px 0;border-bottom:1px solid #23272e}
+td:first-child{color:#828a97}
+td:last-child{text-align:right;color:#e8eaee}
+.note{font-size:11.5px;color:#7b8290;line-height:1.7;margin-top:8px}
+.note b{color:#ff8a5c;font-weight:600}
+#anchors{font-family:ui-monospace,monospace;font-size:11px;color:#7ed957;
+         white-space:pre-wrap;max-height:110px;overflow:auto;margin-top:6px}
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="cv" width="960" height="1334"></canvas></div>
+
+<div id="panel">
+  <h1>查手机 · 对抗线原型 v1</h1>
+  <div class="sub">五张关键帧(5/25/50/75/95)+ 龙王斗女帝的战线数值模型</div>
+
+  <div class="card">
+    <h2>驱动</h2>
+    <div class="row">
+      <button id="btnPlay" class="on">⏸ 暂停</button>
+      <span class="seg">
+        <button data-jump="5">5%</button><button data-jump="25">25%</button>
+        <button data-jump="50">50%</button><button data-jump="75">75%</button>
+        <button data-jump="95">95%</button>
+      </span>
+    </div>
+    <div class="row"><label>推力占比 p</label>
+      <input type="range" id="sP" min="5" max="95" step="0.1" value="50">
+      <span class="val" id="vP">50.0%</span></div>
+    <div class="row"><label>循环周期</label>
+      <input type="range" id="sCycle" min="4" max="30" step="0.5" value="14">
+      <span class="val" id="vCycle">14.0s</span></div>
+  </div>
+
+  <div class="card">
+    <h2>显示</h2>
+    <div class="row"><label>图层</label><span class="seg">
+      <button data-mode="frames">仅关键帧</button>
+      <button data-mode="both" class="on">帧+程序层</button>
+      <button data-mode="proc">仅程序层</button>
+    </span></div>
+    <div class="row"><label>帧过渡</label><span class="seg">
+      <button data-trans="hard">硬切</button>
+      <button data-trans="lin" class="on">线性淡化</button>
+      <button data-trans="ease">缓入缓出</button>
+    </span></div>
+    <div class="row"><label>叠加</label><span class="seg">
+      <button data-tog="line" class="on">对抗线</button>
+      <button data-tog="ticks" class="on">刻度尺</button>
+      <button data-tog="hud" class="on">HUD</button>
+      <button data-tog="anchor">锚点标定</button>
+    </span></div>
+  </div>
+
+  <div class="card">
+    <h2>战线模型(龙王同款)</h2>
+    <div class="row"><label>BIAS_CURVE</label>
+      <input type="range" id="sCurve" min="1" max="3" step="0.05" value="1.7">
+      <span class="val" id="vCurve">1.70</span></div>
+    <div class="row"><label>可达半宽</label>
+      <input type="range" id="sHalf" min="200" max="460" step="2" value="384">
+      <span class="val" id="vHalf">384</span></div>
+    <div class="row"><label>推进速度</label>
+      <input type="range" id="sSpeed" min="40" max="900" step="10" value="320">
+      <span class="val" id="vSpeed">320</span></div>
+    <div class="row"><label>倾斜增益</label>
+      <input type="range" id="sTilt" min="0" max="3" step="0.05" value="1.55">
+      <span class="val" id="vTilt">1.55</span></div>
+    <div class="row"><label>形状幅度</label>
+      <input type="range" id="sBulge" min="0" max="120" step="2" value="46">
+      <span class="val" id="vBulge">46</span></div>
+  </div>
+
+  <div class="card">
+    <h2>实时读数</h2>
+    <table>
+      <tr><td>bias =(p-50)/50</td><td id="dBias">0.000</td></tr>
+      <tr><td>target 目标位</td><td id="dTarget">480.0</td></tr>
+      <tr><td>S.front 实际位</td><td id="dFront">480.0</td></tr>
+      <tr><td>线顶 / 线底 x</td><td id="dTB">480 / 480</td></tr>
+      <tr><td>倾斜量 Δx</td><td id="dTilt">0</td></tr>
+      <tr><td>混合帧</td><td id="dMix">g50 100%</td></tr>
+      <tr><td>FPS</td><td id="dFps">--</td></tr>
+    </table>
+    <div class="note">
+      <b>看什么:</b> ① 线的位置是否跟 HUD 百分比对得上;
+      ② 过渡中人物是否出现双影(这就是要不要上 Spine 的判据);
+      ③ 程序画的线能否盖住图里烘死的那条。
+    </div>
+  </div>
+
+  <div class="card" id="cardAnchor" style="display:none">
+    <h2>锚点标定 — 点画布记录坐标</h2>
+    <div class="row"><span class="seg">
+      <button id="btnAnchorClear">清空</button>
+      <button id="btnAnchorCopy">复制 JSON</button>
+    </span></div>
+    <div id="anchors">(点击画布上手机中心,逐档记录)</div>
+  </div>
+</div>
+
+<script>
+const CV=document.getElementById('cv'), ctx=CV.getContext('2d');
+const W=960,H=1334;
+const KEYS=[5,25,50,75,95];
+const IMG={}; let ready=0;
+
+/* ---------- 几何:与 v9 关键帧目测对齐 ---------- */
+const TOP=128, BOT=1232, MID=480;
+const ROWS=15;
+const LINK_W=0.80, SHAPE_RATE=2.6;
+const GREEN=[126,217,87], RED=[255,72,72];
+
+const P={curve:1.7, half:384, speed:320, tilt:1.55, bulge:46, cycle:14};
+const MODE={layer:'both', trans:'lin', line:true, ticks:true, hud:true, anchor:false};
+const S={t:0, p:50, front:MID, rowOff:new Array(ROWS).fill(0), rowHeat:new Array(ROWS).fill(0), squeeze:1};
+let playing=true, anchors=[];
+
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+
+/* Catmull-Rom 逐行插值 —— 龙王 sampleRow 同构 */
+function sampleRow(arr,y){
+  const d=clamp((y-TOP)/(BOT-TOP),0,1)*(ROWS-1);
+  const i=clamp(Math.floor(d),0,ROWS-2), f=d-i;
+  const p0=arr[Math.max(0,i-1)],p1=arr[i],p2=arr[i+1],p3=arr[Math.min(ROWS-1,i+2)];
+  return 0.5*(2*p1 + (-p0+p2)*f + (2*p0-5*p1+4*p2-p3)*f*f + (-p0+3*p1-3*p2+p3)*f*f*f);
+}
+/* 对抗线在纵深 y 处的位置 —— 全局位置 + 形状 × 收拢 */
+function frontAt(y){ return S.front + sampleRow(S.rowOff,y)*S.squeeze; }
+function heatAt(y){ return clamp(sampleRow(S.rowHeat,y),0,1); }
+
+/* ---------- 数值模型 ---------- */
+function step(dt){
+  S.t+=dt;
+  const bias=(S.p-50)/50;
+  const target=MID+Math.sign(bias)*Math.pow(Math.abs(bias),P.curve)*P.half;
+  const gap=target-S.front;
+  S.front+=Math.sign(gap)*Math.min(Math.abs(gap),P.speed*dt);
+  S.front=clamp(S.front,MID-P.half,MID+P.half);
+
+  const o=S.rowOff,next=new Array(ROWS);
+  for(let r=0;r<ROWS;r++){
+    const d=r/(ROWS-1);
+    // 倾斜:手在画面上方发力,上端先被推过去。(0.5-d) 本身零均值,不会污染全局位置
+    const tilt=(0.5-d)*2*bias*P.tilt;
+    const wob=Math.sin(S.t*0.41+r*0.78)*0.62
+             +Math.sin(S.t*0.77+r*1.55)*0.34
+             +Math.sin(S.t*1.31+r*2.70)*0.18;
+    const desire=(tilt*0.62+wob*0.42)*P.bulge;
+    const nb=((r>0?o[r-1]:o[r])+(r<ROWS-1?o[r+1]:o[r]))/2;
+    const goal=(desire+LINK_W*nb)/(1+LINK_W);
+    next[r]=o[r]+(goal-o[r])*Math.min(1,dt*SHAPE_RATE);
+  }
+  // 零均值化:rowOff 只描述形状,位置由 S.front 独占
+  let mean=0; for(let r=0;r<ROWS;r++) mean+=next[r]; mean/=ROWS;
+  for(let r=0;r<ROWS;r++) o[r]=next[r]-mean;
+
+  // 贴边收拢
+  const m=110;
+  S.squeeze=Math.max(0.18,Math.min(1,Math.min(S.front-(MID-P.half),(MID+P.half)-S.front)/m));
+
+  // 交锋强度:手机高度附近最烈,一边倒时整体降温
+  const hot=1-Math.abs(bias)*0.42;
+  for(let r=0;r<ROWS;r++){
+    const d=r/(ROWS-1);
+    const g=Math.exp(-Math.pow((d-0.36)/0.44,2));
+    const t=clamp(g*1.3*hot,0,1);
+    S.rowHeat[r]+=(t-S.rowHeat[r])*Math.min(1,dt*3.4);
+  }
+}
+
+/* ---------- 纹理 ---------- */
+function tex(stops){
+  const c=document.createElement('canvas'); c.width=64;c.height=1;
+  const g=c.getContext('2d'), grad=g.createLinearGradient(0,0,64,0);
+  stops.forEach(s=>grad.addColorStop(s[0],s[1]));
+  g.fillStyle=grad; g.fillRect(0,0,64,1); return c;
+}
+const rgba=(c,a)=>`rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const TX={
+  band:tex([[0,'rgba(255,255,255,0)'],[.42,'rgba(255,250,235,.9)'],[.5,'rgba(255,255,255,1)'],
+            [.58,'rgba(255,250,235,.9)'],[1,'rgba(255,255,255,0)']]),
+  gL:tex([[0,rgba(GREEN,0)],[.55,rgba(GREEN,.55)],[1,rgba(GREEN,1)]]),
+  rR:tex([[0,rgba(RED,1)],[.45,rgba(RED,.55)],[1,rgba(RED,0)]]),
+};
+function glow(c){
+  const s=192,cv=document.createElement('canvas');cv.width=cv.height=s;
+  const g=cv.getContext('2d'),gr=g.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  gr.addColorStop(0,rgba(c,.85));gr.addColorStop(.45,rgba(c,.3));gr.addColorStop(1,rgba(c,0));
+  g.fillStyle=gr;g.fillRect(0,0,s,s);return cv;
+}
+const GLOW=glow([255,244,220]);
+
+/* 沿线铺带:按纵深切片,每片取该处的 frontAt —— 全是轴对齐 drawImage */
+function ribbon(t,top,bot,slices,widthAt,alphaAt,anchor,jit){
+  const h=(bot-top)/slices;
+  for(let i=0;i<slices;i++){
+    const y0=top+h*i,d=(i+0.5)/slices;
+    const a=alphaAt(d,i),w=widthAt(d,i);
+    if(a<=.004||w<=.5) continue;
+    const x=frontAt(y0+h/2)+(jit||0);
+    ctx.globalAlpha=a;
+    ctx.drawImage(t, anchor<0?x-w:anchor>0?x:x-w/2, y0, w, h+1);
+  }
+}
+
+function drawLine(){
+  const jit=Math.sin(S.t*47)*2.4;
+  const heat=.42+.58, pulse=.76+Math.sin(S.t*13)*.14+Math.sin(S.t*29)*.08;
+  const depth=d=>.42+d*.58;
+  const yAt=d=>TOP+(BOT-TOP)*d;
+  const fade=d=>Math.min(1,d*7)*Math.min(1,(1-d)*9);
+  ctx.save(); ctx.globalCompositeOperation='lighter';
+
+  const sideW=d=>(92+d*150)*(.55+heatAt(yAt(d))*.45);
+  const sideA=d=>heat*pulse*depth(d)*(.35+heatAt(yAt(d))*.65)*fade(d)*.46;
+  ribbon(TX.gL,TOP,BOT,26,sideW,sideA,-1,jit);
+  ribbon(TX.rR,TOP,BOT,26,sideW,sideA,+1,jit);
+
+  ribbon(TX.band,TOP,BOT,56,
+    (d,i)=>(22+d*52)*(.86+Math.sin(S.t*21+i*.4)*.14)*(.42+heatAt(yAt(d))*.85),
+    d=>heat*pulse*depth(d)*(.3+heatAt(yAt(d))*.8)*fade(d)*1.05, 0, jit);
+
+  ctx.globalAlpha=heat*heatAt(BOT)*.3;
+  const gx=frontAt(BOT-40)+jit;
+  ctx.drawImage(GLOW,gx-96,BOT-168,192,192);
+  ctx.restore(); ctx.globalAlpha=1;
+}
+
+/* 刻度尺:跟着线走,证明"线动=进度动" */
+function drawTicks(){
+  ctx.save(); ctx.fillStyle='rgba(255,255,255,.88)';
+  for(let i=0;i<=19;i++){
+    const y=648+i*27; if(y>1170) break;
+    const big=i%5===0, w=big?30:17;
+    ctx.fillRect(frontAt(y)-w/2,y,w,big?4:3);
+  }
+  ctx.restore();
+}
+
+/* HUD:数值条一律程序绘制,不指望生图画对 */
+function drawHUD(p){
+  const bars=[{x:92,w:276,c:GREEN,v:p,dir:1},{x:572,w:296,c:RED,v:100-p,dir:-1}];
+  ctx.save();
+  for(const b of bars){
+    ctx.fillStyle='rgba(8,10,13,.92)'; ctx.fillRect(b.x,74,b.w,31);
+    const fw=b.w*b.v/100;
+    const gx=b.dir>0?b.x:b.x+b.w-fw;
+    const g=ctx.createLinearGradient(0,74,0,105);
+    g.addColorStop(0,rgba(b.c,1)); g.addColorStop(1,rgba(b.c.map(v=>v*.62|0),1));
+    ctx.fillStyle=g; ctx.fillRect(gx,74,fw,31);
+    ctx.fillStyle='rgba(255,255,255,.30)'; ctx.fillRect(gx,74,fw,9);
+  }
+  ctx.font='bold 23px ui-monospace,Menlo,monospace';
+  ctx.textBaseline='middle'; ctx.lineWidth=4; ctx.strokeStyle='rgba(0,0,0,.75)';
+  ctx.textAlign='left';  ctx.strokeText(p.toFixed(0)+'%',100,90);  ctx.fillStyle='#fff'; ctx.fillText(p.toFixed(0)+'%',100,90);
+  ctx.textAlign='right'; ctx.strokeText((100-p).toFixed(0)+'%',860,90); ctx.fillStyle='#fff'; ctx.fillText((100-p).toFixed(0)+'%',860,90);
+  ctx.restore();
+}
+
+/* 底图:相邻两档交叉淡化 */
+let mixTxt='';
+function drawFrames(p){
+  const q=clamp(p,KEYS[0],KEYS[KEYS.length-1]);
+  let i=0; while(i<KEYS.length-2 && q>KEYS[i+1]) i++;
+  const a=KEYS[i],b=KEYS[i+1];
+  let t=clamp((q-a)/(b-a),0,1);
+  if(MODE.trans==='hard') t=t<.5?0:1;
+  else if(MODE.trans==='ease') t=t*t*(3-2*t);
+  ctx.globalAlpha=1; ctx.drawImage(IMG[a],0,0,W,H);
+  if(t>0){ ctx.globalAlpha=t; ctx.drawImage(IMG[b],0,0,W,H); }
+  ctx.globalAlpha=1;
+  mixTxt=t<=0?`g${String(a).padStart(2,'0')} 100%`
+        :t>=1?`g${String(b).padStart(2,'0')} 100%`
+        :`g${String(a).padStart(2,'0')} ${((1-t)*100)|0}% + g${String(b).padStart(2,'0')} ${(t*100)|0}%`;
+}
+
+function drawAnchors(){
+  ctx.save();
+  anchors.forEach(a=>{
+    ctx.strokeStyle='#7ed957'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(a.x,a.y,14,0,7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x-22,a.y); ctx.lineTo(a.x+22,a.y);
+    ctx.moveTo(a.x,a.y-22); ctx.lineTo(a.x,a.y+22); ctx.stroke();
+    ctx.font='bold 18px monospace'; ctx.fillStyle='#7ed957'; ctx.textAlign='left';
+    ctx.fillText('p'+a.p.toFixed(0),a.x+26,a.y-6);
+  });
+  ctx.restore();
+}
+
+/* ---------- 主循环 ---------- */
+let last=performance.now(), fps=0, acc=0, frames=0;
+function loop(now){
+  let dt=(now-last)/1000; last=now; dt=Math.min(dt,.05);
+  frames++; acc+=dt; if(acc>=.5){ fps=frames/acc; frames=0; acc=0; }
+
+  if(playing){
+    // 三角波 5 → 95 → 5
+    const ph=(S.t%P.cycle)/P.cycle;
+    S.p=5+90*(ph<.5?ph*2:(1-ph)*2);
+    document.getElementById('sP').value=S.p.toFixed(1);
+  }
+  step(dt);
+
+  ctx.clearRect(0,0,W,H);
+  if(MODE.layer==='proc'){ ctx.fillStyle='#111419'; ctx.fillRect(0,0,W,H); mixTxt='—'; }
+  else drawFrames(S.p);
+  if(MODE.layer!=='frames'){
+    if(MODE.line) drawLine();
+    if(MODE.ticks) drawTicks();
+    if(MODE.hud) drawHUD(S.p);
+  }
+  if(MODE.anchor) drawAnchors();
+
+  const bias=(S.p-50)/50;
+  const target=MID+Math.sign(bias)*Math.pow(Math.abs(bias),P.curve)*P.half;
+  const xt=frontAt(TOP+6), xb=frontAt(BOT-6);
+  const $=id=>document.getElementById(id);
+  $('vP').textContent=S.p.toFixed(1)+'%';
+  $('dBias').textContent=bias.toFixed(3);
+  $('dTarget').textContent=target.toFixed(1);
+  $('dFront').textContent=S.front.toFixed(1);
+  $('dTB').textContent=xt.toFixed(0)+' / '+xb.toFixed(0);
+  $('dTilt').textContent=(xt-xb).toFixed(0);
+  $('dMix').textContent=mixTxt;
+  $('dFps').textContent=fps.toFixed(0);
+  requestAnimationFrame(loop);
+}
+
+/* ---------- UI ---------- */
+const $=id=>document.getElementById(id);
+$('btnPlay').onclick=e=>{ playing=!playing; e.target.textContent=playing?'⏸ 暂停':'▶ 播放'; e.target.classList.toggle('on',playing); };
+document.querySelectorAll('[data-jump]').forEach(b=>b.onclick=()=>{
+  playing=false; $('btnPlay').textContent='▶ 播放'; $('btnPlay').classList.remove('on');
+  S.p=+b.dataset.jump; $('sP').value=S.p;
+});
+$('sP').oninput=e=>{ playing=false; $('btnPlay').textContent='▶ 播放'; $('btnPlay').classList.remove('on'); S.p=+e.target.value; };
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{
+  MODE.layer=b.dataset.mode;
+  document.querySelectorAll('[data-mode]').forEach(x=>x.classList.toggle('on',x===b));
+});
+document.querySelectorAll('[data-trans]').forEach(b=>b.onclick=()=>{
+  MODE.trans=b.dataset.trans;
+  document.querySelectorAll('[data-trans]').forEach(x=>x.classList.toggle('on',x===b));
+});
+document.querySelectorAll('[data-tog]').forEach(b=>b.onclick=()=>{
+  const k=b.dataset.tog; MODE[k]=!MODE[k]; b.classList.toggle('on',MODE[k]);
+  if(k==='anchor') $('cardAnchor').style.display=MODE.anchor?'block':'none';
+});
+const binds=[['sCurve','curve','vCurve',2],['sHalf','half','vHalf',0],['sSpeed','speed','vSpeed',0],
+             ['sTilt','tilt','vTilt',2],['sBulge','bulge','vBulge',0],['sCycle','cycle','vCycle',1]];
+binds.forEach(([sid,key,vid,dp])=>{
+  $(sid).oninput=e=>{ P[key]=+e.target.value; $(vid).textContent=P[key].toFixed(dp)+(key==='cycle'?'s':''); };
+});
+
+CV.onclick=e=>{
+  if(!MODE.anchor) return;
+  const r=CV.getBoundingClientRect();
+  const x=(e.clientX-r.left)*W/r.width, y=(e.clientY-r.top)*H/r.height;
+  anchors.push({p:S.p,x:Math.round(x),y:Math.round(y)});
+  $('anchors').textContent=JSON.stringify(anchors,null,1);
+};
+$('btnAnchorClear').onclick=()=>{anchors=[];$('anchors').textContent='(已清空)';};
+$('btnAnchorCopy').onclick=()=>navigator.clipboard.writeText(JSON.stringify(anchors)).then(()=>alert('已复制'));
+
+/* ---------- 加载 ---------- */
+KEYS.forEach(k=>{
+  const im=new Image();
+  im.onload=()=>{ if(++ready===KEYS.length) requestAnimationFrame(loop); };
+  im.onerror=()=>{ document.title='加载失败 g'+k; };
+  im.src='frames/g'+String(k).padStart(2,'0')+'.jpg';
+  IMG[k]=im;
+});
+</script>
+</body>
+</html>
