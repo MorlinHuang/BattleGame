@@ -11,14 +11,17 @@ const GREEN = [126, 217, 87], RED = [255, 72, 72];
 
 const P = {
   curve: 1.55,     // 进度→位移的非线性，中段慢、末段快
-  half: 160,       // 手机最大偏移（再大，极端档角色会被拖出画）
-  drag: 0.58,      // 角色跟随手机的比例（拔河：赢方后退、输方被拖，间距不变）
+  /* half/drag/身高是一组联动的解，不能单独改：boy 的手臂比 girl 短 20%，
+     手机被拽到他那侧时够不到，靠加大 drag 让身体多跟一点补上；drag 大了
+     角色又要出画，于是把两人一起缩矮。手机相应放大，视觉重量不减。 */
+  half: 120,       // 手机最大偏移
+  drag: 0.78,      // 角色跟随手机的比例（拔河：赢方后退、输方被拖，间距不变）
   tilt: 1.55, bulge: 46, linkW: 0.80, shapeRate: 2.6,
   lean: 0.24,      // 躯干最大倾角(rad)
-  phoneY: 566, phoneW: 78, phoneH: 150,
+  phoneY: 515, phoneW: 112, phoneH: 214,   // 放大：屏幕是题材层主角，且太小的机身会被两只手完全盖住
   girlX: 270, boyX: 676, footY: 1125,
   rug: { top: 738, bot: 1128, tl: 88, tr: 872, bl: 28, br: 912 },  // 底版里地毯四角
-  girlH: 828, boyH: 838,
+  girlH: 760, boyH: 770,
 };
 
 const S = { p: 50, t: 0, auto: true };
@@ -85,19 +88,16 @@ class Actor {
   constructor(def, gl, img, ren, side) {
     this.def = def; this.side = side;      // side: -1 在左(girl), +1 在右(boy)
     this.sk = new Skeleton(def.bones, img.width, img.height);
-    this.mesh = buildMesh(img, this.sk, 46, 68);
+    this.mesh = buildMesh(img, this.sk, 60, 88);
     this.gpu = ren.upload(this.mesh, img);
     this.ren = ren;
-    this.bend = {};
-    for (const a of ['armA', 'armB']) {
-      const u = this.sk.byName(a + '_up'), f = this.sk.byName(a + '_fore');
-      const cr = (u.tx - u.hx) * (f.ty - f.hy) - (u.ty - u.hy) * (f.tx - f.hx);
-      this.bend[a] = cr >= 0 ? 1 : -1;
-    }
+    // 肘往哪边弯：照立绘静止姿势的叉积定，免得 IK 把胳膊反关节折过去
+    const u = this.sk.byName('armA_up'), f = this.sk.byName('armA_fore');
+    this.bendA = (u.tx - u.hx) * (f.ty - f.hy) - (u.ty - u.hy) * (f.tx - f.hx) >= 0 ? 1 : -1;
   }
   rebuild(img) {
     this.sk = new Skeleton(this.def.bones, img.width, img.height);
-    this.mesh = buildMesh(img, this.sk, 46, 68);
+    this.mesh = buildMesh(img, this.sk, 60, 88);
     this.gpu = this.ren.upload(this.mesh, img);
   }
   get scale() { return (this.side < 0 ? P.girlH : P.boyH) / this.sk.imgH; }
@@ -105,23 +105,23 @@ class Actor {
     const s = this.scale, x = this.side < 0 ? FX.girlX : FX.boyX;
     return M.mul(M.trs(x, P.footY, 0, s, s), M.trs(-this.def.anchorX * this.sk.imgW, -this.sk.imgH, 0));
   }
-  /* 摆姿势：躯干倾角由劣势程度决定；
-     两只手抓机身的上下两处，落点写在标定数据里按角色分别给 ——
-     两人臂长和站位不同，共用一组偏移必然有一边够不到或折过头。 */
+  /* 摆姿势：躯干倾角由劣势程度决定；只有靠中线那只手(armA)用 IK 扣住手机，
+     一人抓机身一端，上下错开 —— 两只手掌各约 70px 宽，都去抓同一处，
+     必然叠成一团谁也读不出；外侧那只手离手机太远，硬拽过去就是把袖子
+     拉成面条，所以它整条作为刚体跟着躯干走，一点都不变形。 */
   pose(bias) {
     const sk = this.sk, inv = M.inv(this.model);
     sk.reset();
-    const lean = -bias * P.lean + Math.sin(S.t * 11 + (this.side < 0 ? 0 : 1.7)) * 0.012 * FX.struggle;
+    const ph = this.side < 0 ? 0 : 1.7;
+    const lean = -bias * P.lean + Math.sin(S.t * 11 + ph) * 0.012 * FX.struggle;
     sk.byName('torso').delta = lean;
     sk.byName('head').delta = -lean * 0.55;
-    sk.solve();
+    sk.solve();   // armB 不设 delta：整条手臂作为刚体跟着躯干走
 
     const [px, py] = phonePos(), ro = FX.phoneRot;
     const co = Math.cos(ro), si = Math.sin(ro);
     const grip = ([ox, oy]) => M.apply(inv, px + ox * co - oy * si, py + ox * si + oy * co);
-    const G = this.def.grip;
-    sk.ik('armA_up', 'armA_fore', ...grip(G.A), this.bend.armA);
-    sk.ik('armB_up', 'armB_fore', ...grip(G.B), this.bend.armB);
+    sk.ik('armA_up', 'armA_fore', ...grip(this.def.grip.A), this.bendA);
     sk.solve();
   }
   draw(tint) { this.ren.draw(this.gpu, this.sk, this.model, tint, false); if (DBG.wire) this.ren.draw(this.gpu, this.sk, this.model, tint, true); }
@@ -242,12 +242,12 @@ function drawPhone(ctx) {
   const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
   g.addColorStop(0, 'rgba(150,210,255,.95)'); g.addColorStop(1, 'rgba(90,150,230,.85)');
   ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(-w / 2 + 5, -h / 2 + 9, w - 10, h - 18, 4); ctx.fill();
-  const rows = [[0, .62], [1, .46], [0, .74], [1, .38], [0, .54], [1, .60]];
-  const iw = w - 16, top = -h / 2 + 16;
+  const rows = [[0, .62], [1, .46], [0, .74], [1, .38], [0, .54], [1, .60], [0, .50]];
+  const iw = w - 20, top = -h / 2 + 20, lh = (h - 40) / rows.length;
   rows.forEach(([right, r], i) => {
-    const bw = iw * r, bx = right ? w / 2 - 8 - bw : -w / 2 + 8;
+    const bw = iw * r, bx = right ? w / 2 - 10 - bw : -w / 2 + 10;
     ctx.fillStyle = right ? 'rgba(120,220,120,.92)' : 'rgba(252,252,252,.92)';
-    ctx.beginPath(); ctx.roundRect(bx, top + i * 18, bw, 13, 4); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(bx, top + i * lh, bw, lh * .68, 4); ctx.fill();
   });
   ctx.restore();
 }
@@ -322,6 +322,8 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
   document.getElementById('auto').checked = S.auto;
   if (Q.get('bones') === '1') { DBG.bones = true; document.getElementById('bones').checked = true; }
   if (Q.get('wire') === '1') { DBG.wire = true; document.getElementById('wire').checked = true; }
+  // ?zoom=1 用画布原生尺寸铺开，截图时才看得清网格与五官的实际形变
+  if (Q.get('zoom') === '1') document.getElementById('stage').style.width = W + 'px';
   for (let i = 0; i < 90; i++) derive(1 / 60);   // 预热，让指数趋近收敛到位
 
   let last = performance.now(), fps = 0, fr = 0, acc = 0, dir = 1;
@@ -355,13 +357,88 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     for (const A of actors) A.pose(bias);
     // 劣势方压暗，不叠色相 —— 叠红会把黑发染成棕色，人物形象就变了
     const SHADE = [26, 24, 38];
-    girl.draw([...SHADE, clamp(-bias, 0, 1) * .32]);
-    boy.draw([...SHADE, clamp(bias, 0, 1) * .32]);
+    if (!girl.hidden) girl.draw([...SHADE, clamp(-bias, 0, 1) * .32]);
+    if (!boy.hidden) boy.draw([...SHADE, clamp(bias, 0, 1) * .32]);
 
     fctx.clearRect(0, 0, W, H);
     drawRuler(fctx);
     drawHUD(fctx, S.p);
     if (DBG.bones) drawBones(fctx, actors);
+  }
+
+  /* ?probe=1 报出形变最剧烈的三角形，连同顶点的静止 uv 和骨权重一起打出来。
+     画面上多一条拖影，肉眼只看得出"在哪"，看不出"它是谁的、被谁拉的" ——
+     与其反复猜，不如让它自己报上名来。 */
+  if (Q.get('probe') === '1') {
+    S.t = 3.0; FX.phoneX = MID; FX.rowOff.fill(0); FX.rowHeat.fill(0);
+    for (let k = 0; k < 150; k++) derive(1 / 60);
+    render();
+    const lines = [];
+    for (const A of actors) {
+      const { pos, idx, bone, wt, verts } = A.mesh, bs = A.sk.bones;
+      const nx = new Float32Array(verts), ny = new Float32Array(verts);
+      for (let v = 0; v < verts; v++) {
+        const x = pos[v * 2], y = pos[v * 2 + 1];
+        let ax = 0, ay = 0;
+        for (let k = 0; k < 4; k++) {
+          const w = wt[v * 4 + k]; if (!w) continue;
+          const m = bs[bone[v * 4 + k]].skin;
+          ax += w * (m.a * x + m.c * y + m.e); ay += w * (m.b * x + m.d * y + m.f);
+        }
+        nx[v] = ax; ny[v] = ay;
+      }
+      const worst = [];
+      for (let i = 0; i < idx.length; i += 3) {
+        for (const [p1, q1] of [[0, 1], [1, 2], [2, 0]]) {
+          const a = idx[i + p1], b = idx[i + q1];
+          const L0 = Math.hypot(pos[a * 2] - pos[b * 2], pos[a * 2 + 1] - pos[b * 2 + 1]);
+          const L1 = Math.hypot(nx[a] - nx[b], ny[a] - ny[b]);
+          if (L0 > 0 && L1 / L0 > 2) worst.push([L1 / L0, a, b]);
+        }
+      }
+      worst.sort((p1, q1) => q1[0] - p1[0]);
+      const desc = v => {
+        const ws = [];
+        for (let k = 0; k < 4; k++) if (wt[v * 4 + k] > 0.02) ws.push(bs[bone[v * 4 + k]].name + ':' + wt[v * 4 + k].toFixed(2));
+        return '(' + (pos[v * 2] / A.sk.imgW).toFixed(3) + ',' + (pos[v * 2 + 1] / A.sk.imgH).toFixed(3) + ')[' + ws.join(' ') + ']';
+      };
+      const seen = new Set();
+      lines.push((A.side < 0 ? 'girl' : 'boy') + '  超限边 ' + worst.length + ' 条');
+      /* 整块皮被搬到别处时边长并不变，超限边查不出来 —— 再按"位移比邻居
+         多出多少"排一次，专抓这种平移型的错位。 */
+      const odd = [];
+      for (let v = 0; v < verts; v++) {
+        const x = pos[v * 2], y = pos[v * 2 + 1];
+        odd.push([Math.hypot(nx[v] - x, ny[v] - y), v]);
+      }
+      odd.sort((p1, q1) => q1[0] - p1[0]);
+      const seen2 = new Set();
+      for (const [d, v] of odd) {
+        if (seen2.size >= 4) break;
+        const key = Math.round(pos[v * 2] / 60) + ',' + Math.round(pos[v * 2 + 1] / 60);
+        if (seen2.has(key)) continue;
+        seen2.add(key);
+        lines.push('  位移' + d.toFixed(0) + 'px ' + desc(v));
+      }
+      for (const [r, a, b] of worst) {
+        if (seen.size >= 6) break;
+        const key = Math.round(pos[a * 2] / 50) + ',' + Math.round(pos[a * 2 + 1] / 50);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        lines.push('  x' + r.toFixed(1) + ' ' + desc(a) + ' — ' + desc(b));
+      }
+    }
+    const out = document.createElement('canvas');
+    out.width = 1500; out.height = 30 + lines.length * 25;
+    const o = out.getContext('2d');
+    o.fillStyle = '#0c0e12'; o.fillRect(0, 0, out.width, out.height);
+    o.fillStyle = '#7ed957'; o.font = 'bold 16px ui-monospace,Menlo,monospace'; o.textAlign = 'left';
+    lines.forEach((t, i) => o.fillText(t, 10, 26 + i * 25));
+    document.getElementById('stage').replaceWith(out);
+    out.style.cssText = 'width:100%;max-width:1500px;display:block';
+    document.querySelector('.panel').style.display = 'none';
+    document.title = 'probe ready';
+    return;
   }
 
   /* 胶片模式 ?strip=N：把 N 个连续档位并排渲成一条，用来核对
@@ -390,6 +467,66 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     out.style.cssText = 'width:100%;max-width:1900px;display:block';
     document.querySelector('.panel').style.display = 'none';
     document.title = 'strip ready';
+    return;
+  }
+
+  /* ?inspect=1 局部放大检视：网格变形的毛病都在小尺度上 ——
+     整图缩到 420px 宽时手指和五官怎么歪的根本看不出来。
+     配 &wire=1 可同时看网格线。 */
+  if (Q.has('inspect')) {
+    const PAD = 10, ZOF = t => t.startsWith('只有') ? 0.86 : 1.8;   // 单人对比格只需看轮廓，缩小并排
+    S.t = 3.0;
+    FX.phoneX = MID; FX.rowOff.fill(0); FX.rowHeat.fill(0);
+    for (let k = 0; k < 150; k++) derive(1 / 60);
+    render();
+    // 框跟着角色走，否则极端档人物移开了，框住的全是背景
+    const cx0 = phonePos()[0] - 240;
+    const boxes = [
+      [['中央 · 手机与四手', cx0, 395, 480, 350]],
+      [['girl 头', FX.girlX - 105, 309, 230, 295], ['boy 头', FX.boyX - 141, 293, 230, 295]],
+      [['只有 girl', cx0, 395, 480, 350], ['只有 boy', cx0, 395, 480, 350]],
+    ];
+    /* 单人渲染：画面上多出来的一块形变到底是谁身上的，两人叠在一起时
+       根本分不清，各渲一次就一目了然。 */
+    const solo = {};
+    for (const A of actors) {
+      for (const B of actors) B.hidden = B !== A;
+      render();
+      const c = document.createElement('canvas');
+      c.width = 480; c.height = 350;
+      const g2 = c.getContext('2d');
+      for (const cv of [cvBg, cvCh, cvFx]) g2.drawImage(cv, cx0, 395, 480, 350, 0, 0, 480, 350);
+      solo[A.side < 0 ? '只有 girl' : '只有 boy'] = c;
+    }
+    for (const B of actors) B.hidden = false;
+    render();
+    const rowW = r => r.reduce((a, b) => a + b[3] * ZOF(b[0]), 0) + PAD * (r.length - 1);
+    const out = document.createElement('canvas');
+    out.width = Math.max(...boxes.map(rowW));
+    out.height = boxes.reduce((a, r) => a + r[0][4] * ZOF(r[0][0]) + 24, 0);
+    const o = out.getContext('2d');
+    o.imageSmoothingEnabled = false;              // 放大要看像素级形变，不能糊
+    o.fillStyle = '#0c0e12'; o.fillRect(0, 0, out.width, out.height);
+    let oy = 0;
+    for (const row of boxes) {
+      let ox = 0;
+      for (const [t, x, y, w, h] of row) {
+        const Z = ZOF(t);
+        if (solo[t]) o.drawImage(solo[t], 0, 0, w, h, ox, oy, w * Z, h * Z);
+        else for (const c of [cvBg, cvCh, cvFx]) o.drawImage(c, x, y, w, h, ox, oy, w * Z, h * Z);
+        o.strokeStyle = '#2c333f'; o.strokeRect(ox + .5, oy + .5, w * Z - 1, h * Z - 1);
+        o.fillStyle = '#e8ecf2';
+        o.font = 'bold 15px ui-monospace,Menlo,monospace';
+        o.textAlign = 'left';
+        o.fillText(`${t}  p=${S.p.toFixed(0)}`, ox + 4, oy + h * Z + 18);
+        ox += w * Z + PAD;
+      }
+      oy += row[0][4] * ZOF(row[0][0]) + 24;
+    }
+    document.getElementById('stage').replaceWith(out);
+    out.style.cssText = 'width:100%;max-width:1900px;display:block';
+    document.querySelector('.panel').style.display = 'none';
+    document.title = 'inspect ready';
     return;
   }
 
