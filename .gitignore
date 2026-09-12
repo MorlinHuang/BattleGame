@@ -32,3 +32,6 @@ node_modules/
 *.apk
 *.aab
 *.unitypackage
+
+# Unity 移植：打包用的临时压缩包不入库
+chashouji/unity/*.zip

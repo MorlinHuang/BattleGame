@@ -26,10 +26,11 @@ public static class Gfx {
         get { if (csh == null) csh = Shader.Find(CHAR_SHADER); return csh; }
     }
 
-    /// 正常 alpha 叠加
+    /* 正常 alpha 叠加。shader 里把颜色预乘过 alpha 了，所以源因子取 One 而不是
+       SrcAlpha —— 再乘一次等于把半透明的东西按 alpha 平方压暗。 */
     public static Material NewAlphaMat() {
         var m = new Material(VertexShader);
-        m.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        m.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.One);
         m.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
         return m;
     }
