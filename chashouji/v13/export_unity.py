@@ -23,8 +23,11 @@ alpha 面积同时受姿态影响（趴下的人面积本来就小），拿它�
 是 4 的倍数，画布高 1334 不是，Unity 导入时只能退回未压缩的 RGBA32 —— 93 张
 就是 454MB。裁成 960x900 之后压到 77MB。引擎侧按同一个 FRAME_TOP 摆放。
 
-全局系数取"最宽的一档正好塞进画布"：原图里两人总是撑满 1024 画幅，而横向
-裁切切掉的是实打实的手脚 —— 实测左右各裁 40px 就损失 3~5% 的身体面积。
+全局系数只保证"脚所在的那条横带"塞进画布（VISIBLE_BAND），不保证整个包围
+盒：生图的画幅被两人的头发撑得很宽，尤其是女方甩出去的长发，按包围盒定系数
+会让整组人缩小两成。切口出现在画面中间（一只鞋齐刷刷没了）是缺陷，切口落在
+画面左右边缘（头发延伸出屏幕）是正常构图 —— 这两件事不该用同一个约束。所以
+下半身必须完整，上面飘出去多少不管。
 
 尺度统一后有几档宽到按质心居中就会顶出画布。硬把它推回画布内，重心就会在
 相邻档之间弹 —— p=95 要推 58px 而 p=100 一点不用，硬切时整组人横向一跳。所
@@ -42,6 +45,7 @@ W, H = 960, 1334       # 游戏画布
 FRAME_TOP, FRAME_H = 308, 900   # 帧纹理覆盖画布上的哪一条横带，引擎侧同值
 FOOT_Y = 1200          # 双方最低点（脚或膝）落在这条地面线上
 MARGIN = 4             # 最宽那档到画布左右边的总余量
+VISIBLE_BAND = 0.25    # 人物下多少比例的高度必须完整落在画布内（脚与小腿）
 SCALE_CAP = 1.20       # 单档尺度修正上限，见下方注释
 RATE = 15              # 每 5% 档距允许的重心横向偏移上限（px），按实际档距缩放
 DST = '../unity/BattleGame/Assets/Resources/frames'
@@ -61,8 +65,13 @@ def measure(p):
 
     a = al > 16
     ys, xs = np.nonzero(a)
+    y0, y1 = ys.min(), ys.max()
+    # 必须完整可见的那一段：从脚底往上量 VISIBLE_BAND 的身高，双方的鞋和小腿
+    # 都在里面。头发和肘部外缘不在，它们可以飘到画布外。
+    band = a[y1 - round((y1 - y0 + 1) * VISIBLE_BAND):y1 + 1]
+    bx = np.nonzero(band)[1]
     return dict(ref=pink.sum() ** 0.5, cx=xs.mean(),
-                box=(xs.min(), xs.max(), ys.min(), ys.max()))
+                box=(xs.min(), xs.max(), y0, y1), vis=(bx.min(), bx.max()))
 
 
 def main():
@@ -77,10 +86,10 @@ def main():
 
     ref = np.median([v['ref'] for v in m.values()])
     s = {p: min(ref / m[p]['ref'], SCALE_CAP) for p in PS}
-    widest = max((m[p]['box'][1] - m[p]['box'][0] + 1) * s[p] for p in PS)
+    widest = max((m[p]['vis'][1] - m[p]['vis'][0] + 1) * s[p] for p in PS)
     g = (W - MARGIN) / widest
 
-    print(f'尺度基准中位数={ref:.1f}  全局系数={g:.4f}  最宽档归一后={widest:.0f}px')
+    print(f'尺度基准中位数={ref:.1f}  全局系数={g:.4f}  最宽档的可见横带={widest:.0f}px')
 
     # 每档先算出"质心落在画布中线"时的贴图左边界，以及它在不裁切的前提下
     # 能挪动的区间；随后用区间传播把 RATE 的连续性约束并进去。
@@ -90,8 +99,11 @@ def main():
         x0, x1, y0, y1 = m[p]['box']
         w, h = max(1, round((x1 - x0 + 1) * k)), max(1, round((y1 - y0 + 1) * k))
         ideal = W / 2 - (m[p]['cx'] - x0) * k
+        # 允许的贴图左边界区间，只约束可见横带：它的左端不许越过画布左边，
+        # 右端不许越过画布右边。包围盒本身超出去多少不管。
+        v0, v1 = ((v - x0) * k for v in m[p]['vis'])
         plan[p] = dict(k=k, w=w, h=h, ideal=ideal,
-                       lo=min(0, W - w) - ideal, hi=max(0, W - w) - ideal)
+                       lo=-v0 - ideal, hi=(W - v1) - ideal)
 
     def tighten(a, b):
         r = RATE * abs(b - a) / 5                      # 档距越密，允许的位移越小
@@ -107,8 +119,7 @@ def main():
         q = plan[p]
         k, w, h = q['k'], q['w'], q['h']
         shift = float(np.clip(0, q['lo'], q['hi']))    # 在允许区间里尽量不偏
-        # round 之后再夹一次：四舍五入可能把它推出画布一两个像素，白白切掉边缘
-        left = int(np.clip(round(q['ideal'] + shift), min(0, W - w), max(0, W - w)))
+        left = round(q['ideal'] + shift)
         top = FOOT_Y - h
 
         x0, x1, y0, y1 = m[p]['box']
@@ -124,9 +135,12 @@ def main():
         cv[top:top + h, dx0:dx1] = src[:, dx0 - left:dx1 - left]
         Image.fromarray(cv).save(f'{DST}/f{p:03d}.png', optimize=True)
 
-        cut = 1 - (dx1 - dx0) / w
+        v0, v1 = (round((v - x0) * k) for v in m[p]['vis'])
+        if left + v0 < 0 or left + v1 > W:
+            raise SystemExit(f'p={p} 的可见横带被画布切掉了，区间传播的 RATE 太松')
+        out = 1 - (dx1 - dx0) / w
         print(f'p={p:3d} scale={k:.3f} {w}x{h} 重心偏移={shift:6.1f} '
-              f'{"裁 %.0f%%" % (cut * 100) if cut > 0.001 else "完整"} '
+              f'{"溢出画布 %.0f%%" % (out * 100) if out > 0.001 else "全在画布内"} '
               f'-> {os.path.getsize(f"{DST}/f{p:03d}.png") // 1024}KB')
 
 

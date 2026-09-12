@@ -52,7 +52,7 @@ public class DebugPanel : MonoBehaviour {
         var fv = Director.I.Frames;
         GUILayout.Label($"p={S.p:0.0}   对抗线x={Director.PhonePos().x:0}   {Director.I.Fps:0}fps");
         GUILayout.Label($"{Director.I.FrameInfo}   当前 f{fv.Shown:000}");
-        GUILayout.Label("角色是 0~100 每 1% 一张，28 档生图画的、其余光流插\n出来，按 p 取最近的一张硬切。");
+        GUILayout.Label("角色是 0~100 每 1% 一张，29 档生图画的、其余光流插\n出来，按 p 取最近的一张硬切。");
         GUI.DragWindow();
     }
 }

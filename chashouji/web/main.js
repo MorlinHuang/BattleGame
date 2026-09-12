@@ -79,7 +79,7 @@ const heatAt = (y) => clamp(sampleRow(FX.rowHeat, y), 0, 1);
 const phonePos = () => [frontAt(FX.phoneY) + FX.jit, FX.phoneY];
 
 /* ---------- 角色：预渲染关键帧 ---------- */
-/* 0~100 每 1% 一张。其中 28 张是生图画的关键档，其余由 interp_frames.py 用
+/* 0~100 每 1% 一张。其中 29 张是生图画的关键档，其余由 interp_frames.py 用
    光流从相邻关键档插出来。从网格变形改走帧序列，是因为两个人抢同一部
    手机时，肩、肘、腕的相对关系每一档都不一样 —— 这种成对的姿态用一套骨骼
    去凑，永远是在"手够不到机身"和"肘折过头"之间取舍。
