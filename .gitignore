@@ -12,3 +12,23 @@ Thumbs.db
 *.tmp
 /tmp/
 node_modules/
+
+# Unity 工程生成物（Library 可达数 GB，Unity 打开工程会自动重建）
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+*.csproj
+*.unityproj
+*.sln
+*.user
+*.booproj
+*.pidb
+*.svd
+*.apk
+*.aab
+*.unitypackage
