@@ -20,13 +20,26 @@ const P = {
   tilt: 1.55, bulge: 46, linkW: 0.80, shapeRate: 2.6,
   phoneY: 560,     // 对抗线上"手机所在高度"，刻度与辉光的锚
   rug: { top: 738, bot: 1128, tl: 88, tr: 872, bl: 28, br: 912 },  // 底版里地毯四角
+
+  /* 挨一下之后的反应。冲击沿对抗线传播、角色被推开又弹回，两件事各有一套
+     参数：线是软的（传得快、留得久），人是硬的（推得动、马上站回来）。 */
+  waveSpread: 7.0,   // 冲量向相邻行传播的速率
+  waveDecay: 0.945,  // 冲量每帧的留存；再高线会晃到一秒开外，像被风吹着
+  hitK: 620,         // 角色回中的弹力
+  hitDamp: 0.90,     // 角色横向速度的阻尼
+  punchDecay: 0.88,  // 缩放脉冲的衰减
+  tintDecay: 0.82,   // 染色的衰减
 };
 
 const S = { p: 50, t: 0, auto: true };
 const FX = {
   phoneX: MID, phoneY: P.phoneY,
   rowOff: new Array(ROWS).fill(0), rowHeat: new Array(ROWS).fill(0),
+  rowImp: new Array(ROWS).fill(0),   // 冲击波，独立于常规形变
   struggle: 1, actorX: 0, jit: 0,
+  hitX: 0, hitV: 0,                  // 角色被推开的位移与速度
+  punch: 0,                          // 缩放脉冲
+  tint: [255, 255, 255], tintA: 0,   // 命中染色
 };
 
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -45,7 +58,28 @@ function derive(dt) {
   FX.jit = Math.sin(S.t * 47) * 2.4 * FX.struggle;
   FX.phoneY = P.phoneY + Math.sin(S.t * 9.3) * 6 * FX.struggle - Math.abs(bias) * 14;
 
-  FX.actorX = (FX.phoneX - MID) * P.drag;
+  /* 角色被推开又站回来：弹簧-阻尼，不是单纯衰减 —— 单纯衰减只有"飘回去"，
+     看不出"被推动了"。挨一下给的是速度不是位移。 */
+  FX.hitV += -FX.hitX * P.hitK * dt;
+  FX.hitV *= Math.pow(P.hitDamp, dt * 60);
+  FX.hitX += FX.hitV * dt;
+  FX.actorX = (FX.phoneX - MID) * P.drag + FX.hitX;
+
+  FX.punch *= Math.pow(P.punchDecay, dt * 60);
+  if (FX.punch < 0.002) FX.punch = 0;
+  FX.tintA *= Math.pow(P.tintDecay, dt * 60);
+  if (FX.tintA < 0.004) FX.tintA = 0;
+
+  /* 对抗线上的冲击波：命中那一行注入冲量，随后沿线上下传播并衰减。它与
+     rowOff 分开演化、最后一起读 —— rowOff 管"谁在推"（慢、由 p 决定），
+     冲量管"刚刚挨了一下"（快、由事件决定）。混在一个数组里的话，一次命中
+     会被 shapeRate 的趋近吃掉大半，读不出撞击。 */
+  const im = FX.rowImp, nim = new Array(ROWS);
+  for (let r = 0; r < ROWS; r++) {
+    const nb = ((r > 0 ? im[r - 1] : im[r]) + (r < ROWS - 1 ? im[r + 1] : im[r])) / 2;
+    nim[r] = (im[r] + (nb - im[r]) * approach(dt, P.waveSpread)) * Math.pow(P.waveDecay, dt * 60);
+  }
+  for (let r = 0; r < ROWS; r++) im[r] = Math.abs(nim[r]) < 0.05 ? 0 : nim[r];
 
   const o = FX.rowOff, next = new Array(ROWS);
   for (let r = 0; r < ROWS; r++) {
@@ -67,6 +101,83 @@ function derive(dt) {
   }
 }
 
+/* ---------- 命中：一次礼物/点赞落地时发生的全部事情 ---------- */
+
+/* 一次命中同时动五样东西：粒子、对抗线冲量、角色位移与染色、屏幕震动、顿帧。
+   写成单一入口而不是散在各处，是因为这五样的强度必须一起缩放 —— 分开调的话
+   小礼物会震得比大礼物还狠，而观众读到的"这一下有多重"正是它们的合力。
+
+   side: +1 打向查岗党(左/女方)，-1 打向灭迹党(右/男方)
+   power: 1 点赞级  2 普通礼物  3 大礼物 */
+function impact(side, y, power, recipe) {
+  const r = recipe || RECIPE.thud;
+  const s = power === 1 ? 0.55 : power === 2 ? 1.0 : 1.7;
+  const x = frontAt(y);
+
+  // 冲量注入命中高度那一行，方向朝被打的一侧
+  const d = clamp((y - TOP) / (BOT - TOP), 0, 1) * (ROWS - 1);
+  const i0 = clamp(Math.floor(d), 0, ROWS - 1);
+  FX.rowImp[i0] += -side * 40 * s;
+  if (i0 > 0) FX.rowImp[i0 - 1] += -side * 22 * s;
+  if (i0 < ROWS - 1) FX.rowImp[i0 + 1] += -side * 22 * s;
+
+  FX.hitV += -side * 320 * s;
+  FX.punch = Math.max(FX.punch, 0.045 * s);
+  /* 染色只是"挨了一下"的提示，不是照明。超过 0.2 角色的线稿和睡衣花纹就被
+     洗掉了，而那正是这个玩法唯一能看的东西。 */
+  FX.tint = r.tint; FX.tintA = Math.max(FX.tintA, 0.15 * Math.min(1.4, s));
+
+  Particles.addShake(7 * s);
+  Particles.addFlash(power >= 3 ? 0.22 : power >= 2 ? 0.10 : 0.03);
+  Particles.hitStop(power >= 3 ? 0.11 : power >= 2 ? 0.07 : 0.035);
+
+  r.burst(x, y, side, s);
+}
+
+/* 配方表：一件礼物炸出什么，只在这里定义。形态（dot/spark/ring/chip/soft）
+   是通用的，换题材皮不用动 fx.js。
+   thud 是通用撞击，任何还没单独配方的东西都落到它上面。 */
+const RECIPE = {
+  thud: {
+    tint: [255, 246, 232],
+    burst(x, y, side, s) {
+      Particles.spawn({ kind: 'dot', x, y, r: 16 * s, r1: 70 * s, life: 0.20,
+                        rgb: [255, 255, 255], a: 0.85 });
+      Particles.spawn({ kind: 'ring', x, y, r: 10 * s, r1: 120 * s, life: 0.38,
+                        rgb: [255, 236, 200], lw: 6 * s });
+      // 第二道环晚 70ms 出场，读起来是"砰—砰"两下而不是一下
+      setTimeout(() => Particles.spawn({ kind: 'ring', x, y, r: 8 * s, r1: 180 * s,
+                        life: 0.44, rgb: [255, 226, 180], lw: 4 * s }), 70);
+      /* 火花给足数量。画布 960x1334，二三十个粒子铺开就只剩零星几点，
+         读不出"炸开"—— 这里的密度感是靠数量堆的，不是靠单颗更亮。 */
+      for (let i = 0; i < Math.round(26 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.2;
+        const sp = (240 + Math.random() * 560) * s;
+        Particles.spawn({ kind: 'spark', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 110,
+                          g: 980, drag: 0.985, life: 0.24 + Math.random() * 0.3,
+                          rgb: i % 4 ? [255, 238, 196] : [255, 255, 255],
+                          lw: 1.4 + Math.random() * 2.2 * s });
+      }
+      for (let i = 0; i < Math.round(14 * s); i++) {
+        Particles.spawn({ kind: 'soft', x: x + (Math.random() - 0.5) * 60 * s, y: y + (Math.random() - 0.3) * 40,
+                          vx: -side * (40 + Math.random() * 150) * s, vy: -20 - Math.random() * 80,
+                          g: 90, drag: 0.94, r: 10 * s, r1: (46 + Math.random() * 34) * s,
+                          life: 0.7 + Math.random() * 0.7, rgb: [216, 208, 196], a: 0.34 });
+      }
+      // 翻滚的小片：撞击总要崩下点什么，没有它只有光，像是凭空亮了一下
+      for (let i = 0; i < Math.round(9 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.4;
+        const sp = (170 + Math.random() * 330) * s;
+        Particles.spawn({ kind: 'chip', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 200,
+                          g: 780, drag: 0.99, life: 0.7 + Math.random() * 0.6,
+                          w: 5 + Math.random() * 7 * s, h: 3 + Math.random() * 5 * s,
+                          rot: Math.random() * 6.28, vrot: (Math.random() - 0.5) * 16,
+                          rgb: [236, 226, 210], a: 0.9 });
+      }
+    },
+  },
+};
+
 function sampleRow(arr, y) {
   const d = clamp((y - TOP) / (BOT - TOP), 0, 1) * (ROWS - 1);
   const i = clamp(Math.floor(d), 0, ROWS - 2), f = d - i;
@@ -74,7 +185,7 @@ function sampleRow(arr, y) {
   return p1 + 0.5 * f * (p2 - p0 + f * (2 * p0 - 5 * p1 + 4 * p2 - p3 + f * (3 * (p1 - p2) + p3 - p0)));
 }
 // 对抗线在高度 y 处的横坐标 —— 手机、光柱、刻度、地面分色全读这一个函数
-const frontAt = (y) => FX.phoneX + sampleRow(FX.rowOff, y);
+const frontAt = (y) => FX.phoneX + sampleRow(FX.rowOff, y) + sampleRow(FX.rowImp, y);
 const heatAt = (y) => clamp(sampleRow(FX.rowHeat, y), 0, 1);
 const phonePos = () => [frontAt(FX.phoneY) + FX.jit, FX.phoneY];
 
@@ -101,9 +212,22 @@ class FrameSeq {
     });
   }
 
-  draw(ctx, p, offsetX) {
+  /* punch 是缩放脉冲，tint 是命中染色 —— 角色是预渲染帧，做不了受击变形，
+     打击反馈只能来自贴图之外。缩放以脚底为锚，人挨了一下会"胀"一下但脚不
+     离地；染色走 source-atop，只盖在已画出的角色像素上，不会糊到背景。 */
+  draw(ctx, p, offsetX, punch, tint, tintA) {
     const i = this.map[clamp(Math.round(clamp(p, 0, 100)), 0, 100)];
-    ctx.drawImage(this.imgs[i], offsetX, FRAME_TOP, FRAME_W, FRAME_H);
+    const k = 1 + (punch || 0);
+    const w = FRAME_W * k, h = FRAME_H * k;
+    const foot = FRAME_TOP + FRAME_H;
+    ctx.drawImage(this.imgs[i], offsetX + (FRAME_W - w) / 2, foot - h, w, h);
+    if (tintA > 0.004) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = rgba(tint, tintA);
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
     this.shown = i;
   }
 }
@@ -264,20 +388,34 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
   document.getElementById('auto').checked = S.auto;
   for (let i = 0; i < 90; i++) derive(1 / 60);   // 预热，让指数趋近收敛到位
 
+  /* 震动只作用在"正在发生冲突的东西"上 —— 对抗线、角色、粒子、刻度尺。
+     房间和地毯不动：机位是固定的，整幅画面一起震就得把背景放大做 overscan
+     才不露边，而背景一放大，地毯四角那组标定坐标就全偏了。HUD 也不震，它
+     不在场景里。 */
   function render() {
     const bias = (S.p - 50) / 50;
+    const ox = Particles.off.x, oy = Particles.off.y;
+
     bctx.clearRect(0, 0, W, H);
     bctx.drawImage(bg, 0, 0, W, H);
     drawGround(bctx, bias);
+    bctx.save(); bctx.translate(ox, oy);
     drawLine(bctx);
+    bctx.restore();
 
     cctx.clearRect(0, 0, W, H);
-    seq.draw(cctx, S.p, FX.actorX);
+    cctx.save(); cctx.translate(ox, oy);
+    seq.draw(cctx, S.p, FX.actorX, FX.punch, FX.tint, FX.tintA);
+    cctx.restore();
 
     fctx.clearRect(0, 0, W, H);
+    fctx.save(); fctx.translate(ox, oy);
     drawLine(fctx, 0.42);
     drawRuler(fctx);
+    Particles.draw(fctx);
+    fctx.restore();
     drawHUD(fctx, S.p);
+    Particles.drawFlash(fctx, W, H);
   }
 
   /* ?strip=N 出一条连帧胶片：一次看清 N 个档位之间过不过得去。
@@ -308,11 +446,57 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     return;
   }
 
+  /* ?fxstrip=N 出一条特效胶片：打一下，然后每 MS 毫秒抓一格。
+     特效是瞬时的，单张截图什么也验证不了 —— 只有把同一次命中的前后若干
+     毫秒并排摆着，才看得出顿帧有没有生效、冲击波是不是沿线传出去了、
+     粒子的衰减节奏对不对。 */
+  if (Q.has('fxstrip')) {
+    const n = clamp(+Q.get('fxstrip') | 0, 2, 12);
+    const MS = clamp(+(Q.get('fxms') || 60), 16, 400) / 1000;
+    const sc = 0.5, power = clamp(+(Q.get('fxpower') || 3), 1, 3);
+    S.auto = false; S.t = 3.0;
+    for (let k = 0; k < 150; k++) derive(1 / 60);
+
+    const out = document.createElement('canvas');
+    out.width = n * W * sc; out.height = H * sc;
+    const o = out.getContext('2d');
+    o.fillStyle = '#0c0e12'; o.fillRect(0, 0, out.width, out.height);
+
+    impact(-1, FX.phoneY, power);
+    for (let i = 0; i < n; i++) {
+      if (i > 0) for (let k = 0; k < Math.round(MS * 60); k++) {
+        const d = Particles.tick(1 / 60);   // 与主循环同构：粒子走真实时间，逻辑走 d
+        Particles.update(1 / 60);
+        derive(d);
+      }
+      render();
+      const dx = i * W * sc;
+      for (const c of [cvBg, cvCh, cvFx]) o.drawImage(c, dx, 0, W * sc, H * sc);
+      o.fillStyle = 'rgba(0,0,0,.66)'; o.fillRect(dx, 0, 132, 26);
+      o.fillStyle = '#fff'; o.font = '600 15px system-ui';
+      o.fillText(`+${Math.round(i * MS * 1000)}ms 粒子${Particles.count()}`, dx + 8, 18);
+    }
+    const stage = document.getElementById('stage');
+    stage.style.width = out.width + 'px';
+    stage.style.aspectRatio = `${out.width}/${out.height}`;
+    stage.innerHTML = '';
+    out.style.cssText = 'position:absolute;inset:0;width:100%;height:100%';
+    stage.appendChild(out);
+    return;
+  }
+
   let last = performance.now(), fps = 0, fr = 0, acc = 0, dir = 1;
   function frame(now) {
-    const dt = Math.min(.05, (now - last) / 1000); last = now;
-    S.t += dt; fr++; acc += dt;
+    const raw = Math.min(.05, (now - last) / 1000); last = now;
+    fr++; acc += raw;
     if (acc >= .5) { fps = fr / acc; fr = 0; acc = 0; }
+    /* 顿帧冻住的是游戏逻辑（角色姿态、对抗线、进度），特效照真实时间走。
+       两者用的是不同的时钟：定格是为了让观众多看两眼"他被打中了"，而火花
+       和闪光正是这一下的可视化 —— 把它们一起冻住，爆炸就会迟到一百毫秒，
+       读起来是"闪了一下、卡住、然后才炸开"。 */
+    const dt = Particles.tick(raw);
+    Particles.update(raw);
+    S.t += dt;
 
     if (S.auto) {
       S.p += dir * dt * 9 * (0.35 + Math.abs(Math.sin(S.t * .27)) * 1.5);
@@ -322,7 +506,8 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     derive(dt);
     render();
     document.getElementById('stat').textContent =
-      `p=${S.p.toFixed(1)}  对抗线x=${phonePos()[0].toFixed(0)}  f${String(seq.shown).padStart(3, '0')}  ${fps.toFixed(0)}fps`;
+      `p=${S.p.toFixed(1)}  对抗线x=${phonePos()[0].toFixed(0)}  f${String(seq.shown).padStart(3, '0')}  `
+      + `粒子${Particles.count()}  ${fps.toFixed(0)}fps`;
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -332,6 +517,14 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
   document.getElementById('auto').onchange = e => S.auto = e.target.checked;
   const nudge = d => { S.auto = false; document.getElementById('auto').checked = false;
                        S.p = clamp(S.p + d, 0, 100); pv.value = S.p; };
-  document.getElementById('hitL').onclick = () => nudge(+7);
-  document.getElementById('hitR').onclick = () => nudge(-7);
+  /* 按钮既推进度也打一下：进度是玩法，命中是演出，观众看到的是同一件事。
+     side 取推力的反方向 —— 查岗党加分等于灭迹党挨了一下。 */
+  const hit = (d, power) => {
+    nudge(d);
+    impact(d > 0 ? -1 : +1, FX.phoneY, power);
+  };
+  document.getElementById('hitL').onclick = () => hit(+7, 2);
+  document.getElementById('hitR').onclick = () => hit(-7, 2);
+  document.getElementById('hitBig').onclick = () => hit(+18, 3);
+  document.getElementById('hitSmall').onclick = () => hit(+2, 1);
 })();
