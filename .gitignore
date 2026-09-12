@@ -35,3 +35,7 @@ node_modules/
 
 # Unity 移植：打包用的临时压缩包不入库
 chashouji/unity/*.zip
+
+# 查手机 v13：抠像与合成的中间产物，可由 v13/cutout.py + compose.py 从 raw 重跑
+chashouji/v13/parts/
+chashouji/v13/frames/

@@ -15,15 +15,11 @@ public class MeshObj {
 
 public static class Gfx {
     public const string VERTEX_SHADER = "Chashouji/Vertex2D";
-    public const string CHAR_SHADER   = "Chashouji/CharTint";
 
-    static Shader vsh, csh;
+    static Shader vsh;
 
     public static Shader VertexShader {
         get { if (vsh == null) vsh = Shader.Find(VERTEX_SHADER); return vsh; }
-    }
-    public static Shader CharShader {
-        get { if (csh == null) csh = Shader.Find(CHAR_SHADER); return csh; }
     }
 
     /* 正常 alpha 叠加。shader 里把颜色预乘过 alpha 了，所以源因子取 One 而不是
@@ -40,12 +36,6 @@ public static class Gfx {
         var m = new Material(VertexShader);
         m.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.One);
         m.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
-        return m;
-    }
-
-    public static Material NewCharMat(Texture2D tex) {
-        var m = new Material(CharShader);
-        m.mainTexture = tex;
         return m;
     }
 

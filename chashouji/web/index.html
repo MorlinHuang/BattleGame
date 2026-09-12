@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>查手机 v10 — 网格变形版</title>
+<title>查手机 v13 — 关键帧版</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:#0c0e12;color:#e8ecf2;font:14px/1.6 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;
@@ -29,7 +29,7 @@
 </style>
 </head>
 <body>
-<h1>查手机 v10<span>网格变形 + 半骨骼 · 单一真源</span></h1>
+<h1>查手机 v13<span>0~100 每 5% 一张关键帧 · 单一真源</span></h1>
 
 <div id="stage">
   <canvas id="bg" width="960" height="1334"></canvas>
@@ -45,17 +45,11 @@
   </div>
   <div class="row">
     <label><input id="auto" type="checkbox" checked>自动演示</label>
-    <label><input id="wire" type="checkbox">网格线</label>
-    <label><input id="bones" type="checkbox">骨骼（可拖关节标定）</label>
-    <button id="dump">导出标定 JSON</button>
   </div>
   <div class="row"><span id="stat"></span><span id="msg"></span></div>
-  <div class="hint">手机位置是全场唯一真源：光柱、刻度尺、地面分色、双手 IK 目标都读它，所以线永远对得上画面。</div>
-  <textarea id="out" spellcheck="false"></textarea>
+  <div class="hint">角色是 0~100 每 5% 一张画好的关键帧，相邻两张按 p 交叉淡化；对抗线、刻度尺、地面分色同读一个 p，所以线永远对得上画面。</div>
 </div>
 
-<script src="rig.js"></script>
-<script src="rigdata.js"></script>
 <script src="main.js"></script>
 </body>
 </html>

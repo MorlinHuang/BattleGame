@@ -18,8 +18,6 @@ public class DebugPanel : MonoBehaviour {
     void Update() {
         if (Input.GetKeyDown(KeyCode.F1)) show = !show;
         if (Input.GetKeyDown(KeyCode.Space)) Director.S.auto = !Director.S.auto;
-        if (Input.GetKeyDown(KeyCode.W)) Director.DBG.wire = !Director.DBG.wire;
-        if (Input.GetKeyDown(KeyCode.B)) Director.DBG.bones = !Director.DBG.bones;
         if (Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.A)) Director.I.Nudge(60f * Time.deltaTime);
         if (Input.GetKey(KeyCode.RightArrow) || Input.GetKey(KeyCode.D)) Director.I.Nudge(-60f * Time.deltaTime);
         if (Input.GetKeyDown(KeyCode.Escape)) {
@@ -41,7 +39,7 @@ public class DebugPanel : MonoBehaviour {
     }
 
     void DrawWin(int id) {
-        var S = Director.S; var DBG = Director.DBG;
+        var S = Director.S;
         GUILayout.Space(4);
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("查岗党 +7", GUILayout.Width(96))) Director.I.Nudge(+7f);
@@ -49,16 +47,12 @@ public class DebugPanel : MonoBehaviour {
         if (GUILayout.Button("灭迹党 +7", GUILayout.Width(96))) Director.I.Nudge(-7f);
         GUILayout.EndHorizontal();
 
-        GUILayout.BeginHorizontal();
         S.auto = GUILayout.Toggle(S.auto, "自动演示(空格)");
-        DBG.wire = GUILayout.Toggle(DBG.wire, "网格线(W)");
-        DBG.bones = GUILayout.Toggle(DBG.bones, "骨骼(B)");
-        GUILayout.EndHorizontal();
 
-        var pp = Director.PhonePos();
-        GUILayout.Label($"p={S.p:0.0}   phoneX={pp.x:0}   {Director.I.Fps:0}fps");
-        GUILayout.Label(Director.I.MeshInfo);
-        GUILayout.Label("手机位置是全场唯一真源：光柱、刻度尺、地面辉光、\n双手 IK 目标都读它，所以线永远对得上画面。");
+        var fv = Director.I.Frames;
+        GUILayout.Label($"p={S.p:0.0}   对抗线x={Director.PhonePos().x:0}   {Director.I.Fps:0}fps");
+        GUILayout.Label($"{Director.I.FrameInfo}   当前 f{fv.ShownLo:000}+{fv.Blend:0.00}");
+        GUILayout.Label("角色是 0~100 每 5% 一张画好的关键帧，相邻两张按 p 交叉\n淡化；对抗线、刻度、地面辉光同读一个 p。");
         GUI.DragWindow();
     }
 }

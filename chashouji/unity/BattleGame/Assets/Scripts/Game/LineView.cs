@@ -8,6 +8,10 @@ namespace Chashouji {
 public class LineView {
     readonly Draw2D d = new Draw2D();
     readonly MeshObj obj;
+    /* 整体强度。这条线要建两遍：一遍排在角色之下当背景光柱，一遍以更低的强度
+       排在角色之上 —— 两个人正好在中间抢东西，只画在下面的话对抗线全程被两具
+       身体挡死，而它是这个玩法唯一的战况读数。 */
+    readonly float k;
 
     struct Stop { public float t; public Color c; public Stop(float t, Color c) { this.t = t; this.c = c; } }
 
@@ -31,8 +35,9 @@ public class LineView {
         new Stop(1f,   C(255, 72, 72, 0f)),
     };
 
-    public LineView(Transform parent, int order) {
+    public LineView(Transform parent, int order, float strength = 1f) {
         obj = Gfx.NewMesh("line", parent, Gfx.NewAddMat(), order);
+        k = strength;
     }
 
     void GradQuad(float x, float y, float w, float h, Stop[] stops, float alpha) {
@@ -70,15 +75,15 @@ public class LineView {
 
         System.Func<float, int, float> sideW = (x, i) => (92f + x * 150f) * (.55f + Director.HeatAt(yAt(x)) * .45f);
         System.Func<float, int, float> sideA = (x, i) =>
-            pulse * depth(x) * (.35f + Director.HeatAt(yAt(x)) * .65f) * fade(x) * .38f;
+            pulse * depth(x) * (.35f + Director.HeatAt(yAt(x)) * .65f) * fade(x) * .38f * k;
 
         Ribbon(GL, Director.TOP, Director.BOT, 26, sideW, sideA, -1);
         Ribbon(RR, Director.TOP, Director.BOT, 26, sideW, sideA, +1);
         Ribbon(BAND, Director.TOP, Director.BOT, 56,
             (x, i) => (16f + x * 40f) * (.86f + Mathf.Sin(t * 21f + i * .4f) * .14f) * (.42f + Director.HeatAt(yAt(x)) * .85f),
-            (x, i) => pulse * depth(x) * (.3f + Director.HeatAt(yAt(x)) * .8f) * fade(x) * 0.95f, 0);
+            (x, i) => pulse * depth(x) * (.3f + Director.HeatAt(yAt(x)) * .8f) * fade(x) * 0.95f * k, 0);
 
-        float ga = Director.HeatAt(Director.BOT) * .3f;
+        float ga = Director.HeatAt(Director.BOT) * .3f * k;
         if (ga > .004f) {
             float gx = Director.FrontAt(Director.BOT - 40f) + Director.FX.jit;
             d.Glow(gx, Director.BOT - 72f, 96f, C(255, 244, 220, .85f * ga), C(255, 244, 220, .3f * ga), .45f);

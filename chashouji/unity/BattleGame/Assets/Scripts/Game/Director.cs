@@ -3,11 +3,11 @@ using UnityEngine;
 
 namespace Chashouji {
 
-/* 《查手机》Unity 版 —— 单一真源驱动，与网页版 main.js 同构。
+/* 《查手机》Unity 版 —— 单一真源驱动，与网页版同构。
  *
- * 全场唯一状态是 S.p（查岗党进度 0~100）。它派生出 FX.phoneX，手机、双方的手
- * （IK 目标）、对抗线、刻度尺、地面辉光、HUD 全部读它。画面上没有第二个战况
- * 来源，所以"对抗线对不上画面"在构造上不可能发生。
+ * 全场唯一状态是 S.p（查岗党进度 0~100）。它派生出 FX.phoneX，对抗线、刻度尺、
+ * 地面辉光、HUD、角色取哪一帧，全部读它。画面上没有第二个战况来源，所以
+ * "对抗线对不上画面"在构造上不可能发生。
  *
  * 场景整个由代码搭：相机、各层网格、字，全在 Awake 里造出来。于是空场景也能跑，
  * 也不会出现"场景文件里的引用丢了、Play 一下白屏"这种事。
@@ -22,58 +22,42 @@ public class Director : MonoBehaviour {
 
     public class Params {
         public float curve = 1.55f;   // 进度→位移的非线性，中段慢、末段快
-        /* half/drag/站位是一组联动的解，不能单独改。手机的行程有 2×half，可手臂
-           只在"肩到握点 = 0.6~0.95 倍臂长"这一小段里摆得自然：够不到就只能抻长
-           上臂（IK 会拉伸到 1.15 倍，胳膊看着像橡皮），折过头则肘窝挤成一团。
-           drag 让身体跟着手机走，把这 2×half 的行程压缩成 2×half×(1-drag) 落进
-           那一小段里 —— boy 的手臂比 girl 短 23%，可用区间更窄，drag 是按他定的。 */
-        public float half = 100f;     // 手机最大偏移
-        public float drag = 0.86f;    // 角色跟随手机的比例（赢方后退、输方被拖，间距不变）
+        /* 关键帧本身已经把"谁被拖过去"画进姿态里了，half/drag 管的是在此之上
+           整组人物平移多少：中段那几档姿态差别很小，全靠这段平移把"手机正在被
+           拽走"读出来，两头则相反 —— 姿态已经够夸张，再平移就该出画了。 */
+        public float half = 108f;     // 对抗线最大偏移
+        public float drag = 0.58f;    // 角色整体跟随对抗线的比例
         public float tilt = 1.55f, bulge = 46f, linkW = 0.80f, shapeRate = 2.6f;
-        /* 躯干最大倾角(rad)。它不只是姿态：躯干一转，肩就绕着腰划一段弧，肩到
-           握点的距离跟着变 —— 倾角 0.24 时这段弧有 ±50px，比手机行程被 drag 抵消
-           之后剩下的那点变化还大，两头一个折死一个抻长。 */
-        public float lean = 0.12f;
-        public float phoneY = 600f, phoneW = 144f, phoneH = 276f;
-        /* 手机高度与两人站位是一组联动的解：手要握在机身上而不是盖在机身上，胳膊
-           就得把自己那截手掌的长度让出来 —— 站得太近，肘只能折到 60 度，2D 切片的
-           肘窝一折就皱。 */
-        public float girlX = 177f, boyX = 753f, footY = 1125f;
+        public float phoneY = 560f;   // 对抗线上"手机所在高度"，刻度与辉光的锚
         public float rugTop = 738f, rugBot = 1128f, rugTL = 88f, rugTR = 872f, rugBL = 28f, rugBR = 912f;
-        public float girlH = 700f, boyH = 710f;
     }
 
     public class State { public float p = 50f, t = 0f; public bool auto = true; }
 
     public class Fx {
-        public float phoneX = MID, phoneY = 600f, phoneRot = 0f;
+        public float phoneX = MID, phoneY = 560f;
         public float[] rowOff = new float[ROWS];
         public float[] rowHeat = new float[ROWS];
-        public float struggle = 1f, girlX = 177f, boyX = 753f, jit = 0f;
+        public float struggle = 1f, actorX = 0f, jit = 0f;
     }
-
-    public class Dbg { public bool wire, bones; }
 
     public static Params P = new Params();
     public static State S = new State();
     public static Fx FX = new Fx();
-    public static Dbg DBG = new Dbg();
     public static Director I;
 
-    public ActorView girl, boy;
-    public ActorView[] actors;
-    LineView line;
+    FrameView frames;
+    LineView line, lineOver;
     GroundView ground;
-    PhoneView phone;
     RulerView ruler;
     HudView hud;
-    BonesView bonesView;
     Camera cam;
     MeshObj bgObj;
 
     float fps, frAcc; int frCount; int sweepDir = 1;
     public float Fps => fps;
-    public string MeshInfo { get; private set; } = "";
+    public string FrameInfo { get; private set; } = "";
+    public FrameView Frames => frames;
 
     /* 场景里没放任何东西也能跑：没有 Director 就自己造一个。 */
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -85,26 +69,20 @@ public class Director : MonoBehaviour {
     void Awake() {
         if (I != null && I != this) { Destroy(gameObject); return; }
         I = this;
-        P = new Params(); S = new State(); FX = new Fx(); DBG = new Dbg();
-        FX.phoneY = P.phoneY; FX.girlX = P.girlX; FX.boyX = P.boyX;
+        P = new Params(); S = new State(); FX = new Fx();
+        FX.phoneY = P.phoneY;
 
         GameLog.Init();
         GameLog.Line($"查手机 · Unity {Application.unityVersion} · 色彩空间 {QualitySettings.activeColorSpace}");
-        if (QualitySettings.activeColorSpace != ColorSpace.Gamma)
-            GameLog.Line("提示：工程跑在 Linear 色彩空间，shader 里已做 sRGB 换算；" +
-                         "要与网页版逐像素一致，可在 Player Settings 把 Color Space 设成 Gamma。");
 
         cam = BuildCamera();
         var root = new GameObject("stage").transform;
 
         var bg = LoadTex("bg.jpg");
-        var gimg = LoadTex(RigData.Girl.img);
-        var bimg = LoadTex(RigData.Boy.img);
-        if (bg == null || gimg == null || bimg == null) {
-            GameLog.Line("素材没读到，StreamingAssets/art 下应有 bg.jpg / girl.png / boy.png");
+        if (bg == null) {
+            GameLog.Line("素材没读到，StreamingAssets/art 下应有 bg.jpg 与 frames/f000~f100.png");
             return;
         }
-
         bgObj = Gfx.NewMesh("bg", root, Gfx.NewAlphaMat(), 0);
         bgObj.SetTexture(bg);
         BuildBgQuad(bgObj.mesh);
@@ -112,18 +90,14 @@ public class Director : MonoBehaviour {
         ground = new GroundView(root, 10);
         line = new LineView(root, 20);
 
-        girl = new ActorView(); girl.Init(RigData.Girl, gimg, -1, root, 30);
-        boy  = new ActorView(); boy.Init(RigData.Boy,  bimg, +1, root, 31);
-        actors = new[] { girl, boy };
-        MeshInfo = $"网格 {girl.rm.triCount + boy.rm.triCount} 三角形 / {girl.rm.verts + boy.rm.verts} 顶点";
-        GameLog.Line(MeshInfo);
+        frames = new FrameView();
+        frames.Init(root, 30);
+        FrameInfo = $"关键帧 {frames.Loaded}/{FrameView.N} 张 · 每 {FrameView.STEP}%";
+        GameLog.Line(FrameInfo);
 
-        /* 机身排在角色之下，手才是压在它上面的 —— 这个玩法要读出来的就是"两只
-           手在抢同一部手机"，机身盖在手上，两只手就成了在机身旁边虚抓。 */
-        phone = new PhoneView(root, 25);
+        lineOver = new LineView(root, 40, 0.42f);   // 角色排 30/31，这一遍盖在他们身上
         ruler = new RulerView(root, 50);
         hud = new HudView(root, 60);
-        bonesView = new BonesView(root, 70);
 
         gameObject.AddComponent<DebugPanel>();
 
@@ -186,11 +160,9 @@ public class Director : MonoBehaviour {
 
         FX.struggle = 1f - Mathf.Abs(bias) * 0.78f;        // 僵持度：五五开时最高
         FX.jit = Mathf.Sin(S.t * 47f) * 2.4f * FX.struggle;
-        FX.phoneRot = bias * 0.20f + Mathf.Sin(S.t * 23f) * 0.045f * FX.struggle;
         FX.phoneY = P.phoneY + Mathf.Sin(S.t * 9.3f) * 6f * FX.struggle - Mathf.Abs(bias) * 14f;
 
-        FX.girlX = P.girlX + (FX.phoneX - MID) * P.drag;
-        FX.boyX = P.boyX + (FX.phoneX - MID) * P.drag;
+        FX.actorX = (FX.phoneX - MID) * P.drag;
 
         var o = FX.rowOff;
         var next = new float[ROWS];
@@ -221,7 +193,7 @@ public class Director : MonoBehaviour {
         return p1 + 0.5f * f * (p2 - p0 + f * (2f * p0 - 5f * p1 + 4f * p2 - p3 + f * (3f * (p1 - p2) + p3 - p0)));
     }
 
-    // 对抗线在高度 y 处的横坐标 —— 手机、光柱、刻度、地面辉光全读这一个函数
+    // 对抗线在高度 y 处的横坐标 —— 光柱、刻度、地面辉光全读这一个函数
     public static float FrontAt(float y) => FX.phoneX + SampleRow(FX.rowOff, y);
     public static float HeatAt(float y) => MathX.Clamp(SampleRow(FX.rowHeat, y), 0f, 1f);
     public static Vector2 PhonePos() => new Vector2(FrontAt(FX.phoneY) + FX.jit, FX.phoneY);
@@ -241,22 +213,14 @@ public class Director : MonoBehaviour {
     }
 
     void Render() {
-        if (actors == null) return;
+        if (frames == null) return;
         FitCamera();
-        float bias = (S.p - 50f) / 50f;
-
-        ground.Rebuild(bias);
+        ground.Rebuild((S.p - 50f) / 50f);
         line.Rebuild();
-
-        // 劣势方压暗，不叠色相 —— 叠红会把黑发染成棕色，人物形象就变了
-        foreach (var a in actors) { a.Pose(bias); a.Skin(); a.WireVisible = DBG.wire; }
-        girl.SetTint(26, 24, 38, MathX.Clamp(-bias, 0f, 1f) * 0.32f);
-        boy.SetTint(26, 24, 38, MathX.Clamp(bias, 0f, 1f) * 0.32f);
-
-        phone.Rebuild();
+        frames.Rebuild(S.p, FX.actorX);
+        lineOver.Rebuild();
         ruler.Rebuild();
         hud.Rebuild(S.p);
-        bonesView.Rebuild(DBG.bones ? actors : null);
     }
 
     public void Nudge(float d) { S.auto = false; S.p = MathX.Clamp(S.p + d, 0f, 100f); }
