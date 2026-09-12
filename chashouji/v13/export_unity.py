@@ -13,6 +13,16 @@ alpha 面积同时受姿态影响（趴下的人面积本来就小），拿它�
 方向与 p 的走向相反。重心该往哪偏是引擎按 p 连续算的（actorX），帧本身只管
 姿态。
 
+尺度修正带上限（SCALE_CAP）：偶尔有一张被模型画得特别小（p=82 的基准只有
+中位数的 77%），把它修到位就得放大三成，而原图两人本来就撑满画幅，放大后
+横向撑爆画布 —— 全局系数被它一张拖低，101 档跟着一起缩小 7%。宁可让这一
+档人物比别人小一点。
+
+帧只输出人物实际占的那条横带（FRAME_TOP 往下 FRAME_H 高），不是整块画布：
+上面三百多行、下面一百多行全是透明像素，白占三成显存；而且 DXT 压缩要求边长
+是 4 的倍数，画布高 1334 不是，Unity 导入时只能退回未压缩的 RGBA32 —— 93 张
+就是 454MB。裁成 960x900 之后压到 77MB。引擎侧按同一个 FRAME_TOP 摆放。
+
 全局系数取"最宽的一档正好塞进画布"：原图里两人总是撑满 1024 画幅，而横向
 裁切切掉的是实打实的手脚 —— 实测左右各裁 40px 就损失 3~5% 的身体面积。
 
@@ -23,16 +33,21 @@ alpha 面积同时受姿态影响（趴下的人面积本来就小），拿它�
 来的方向正好是 p 越大整组人越靠左，与"查岗党占优就把手机拽向左"一致。
 """
 import os
+import re
 
 import numpy as np
 from PIL import Image
 
-W, H = 960, 1334
+W, H = 960, 1334       # 游戏画布
+FRAME_TOP, FRAME_H = 308, 900   # 帧纹理覆盖画布上的哪一条横带，引擎侧同值
 FOOT_Y = 1200          # 双方最低点（脚或膝）落在这条地面线上
 MARGIN = 4             # 最宽那档到画布左右边的总余量
-RATE = 15              # 相邻两档的重心横向偏移上限（px）
-DST = '../unity/BattleGame/Assets/StreamingAssets/art/frames'
-PS = list(range(0, 101, 5))
+SCALE_CAP = 1.20       # 单档尺度修正上限，见下方注释
+RATE = 15              # 每 5% 档距允许的重心横向偏移上限（px），按实际档距缩放
+DST = '../unity/BattleGame/Assets/Resources/frames'
+# 档位集合由 parts/ 里实际有哪些帧决定：补帧阶段它是不等间距的，
+# 光流补满之后才回到每 1% 一张。
+PS = sorted(int(n[1:4]) for n in os.listdir('parts') if re.fullmatch(r'f\d{3}\.png', n))
 
 
 def measure(p):
@@ -51,11 +66,17 @@ def measure(p):
 
 
 def main():
+    # 先清空：光流补出来的中间帧也躺在这个目录里，关键档一变它们就过期了，
+    # 留着会跟新导出的帧混在一起。补帧由 interp_frames.py 在这之后重跑。
     os.makedirs(DST, exist_ok=True)
+    for n in os.listdir(DST):
+        if re.fullmatch(r'f\d{3}\.png', n):
+            os.remove(os.path.join(DST, n))
+
     m = {p: measure(p) for p in PS}
 
     ref = np.median([v['ref'] for v in m.values()])
-    s = {p: ref / m[p]['ref'] for p in PS}
+    s = {p: min(ref / m[p]['ref'], SCALE_CAP) for p in PS}
     widest = max((m[p]['box'][1] - m[p]['box'][0] + 1) * s[p] for p in PS)
     g = (W - MARGIN) / widest
 
@@ -72,27 +93,35 @@ def main():
         plan[p] = dict(k=k, w=w, h=h, ideal=ideal,
                        lo=min(0, W - w) - ideal, hi=max(0, W - w) - ideal)
 
-    for a, b in zip(PS, PS[1:]):                       # 前向收紧
-        plan[b]['lo'] = max(plan[b]['lo'], plan[a]['lo'] - RATE)
-        plan[b]['hi'] = min(plan[b]['hi'], plan[a]['hi'] + RATE)
-    for a, b in zip(PS[::-1], PS[-2::-1]):             # 后向收紧
-        plan[b]['lo'] = max(plan[b]['lo'], plan[a]['lo'] - RATE)
-        plan[b]['hi'] = min(plan[b]['hi'], plan[a]['hi'] + RATE)
+    def tighten(a, b):
+        r = RATE * abs(b - a) / 5                      # 档距越密，允许的位移越小
+        plan[b]['lo'] = max(plan[b]['lo'], plan[a]['lo'] - r)
+        plan[b]['hi'] = min(plan[b]['hi'], plan[a]['hi'] + r)
+
+    for a, b in zip(PS, PS[1:]):
+        tighten(a, b)
+    for a, b in zip(PS[::-1], PS[-2::-1]):
+        tighten(a, b)
 
     for p in PS:
         q = plan[p]
         k, w, h = q['k'], q['w'], q['h']
         shift = float(np.clip(0, q['lo'], q['hi']))    # 在允许区间里尽量不偏
-        left, top = round(q['ideal'] + shift), FOOT_Y - h
+        # round 之后再夹一次：四舍五入可能把它推出画布一两个像素，白白切掉边缘
+        left = int(np.clip(round(q['ideal'] + shift), min(0, W - w), max(0, W - w)))
+        top = FOOT_Y - h
 
         x0, x1, y0, y1 = m[p]['box']
         im = Image.open(f'parts/f{p:03d}.png').crop((x0, y0, x1 + 1, y1 + 1))
         src = np.array(im.resize((w, h), Image.LANCZOS))
 
+        top -= FRAME_TOP                               # 换算到帧纹理的坐标系
+        if top < 0 or top + h > FRAME_H:
+            raise SystemExit(f'p={p} 的人物（{h}px 高，顶在 {top}）超出 FRAME_H='
+                             f'{FRAME_H} 这条横带，改常量并同步引擎侧')
         dx0, dx1 = max(0, left), min(W, left + w)
-        dy0, dy1 = max(0, top), min(H, top + h)
-        cv = np.zeros((H, W, 4), np.uint8)
-        cv[dy0:dy1, dx0:dx1] = src[dy0 - top:dy1 - top, dx0 - left:dx1 - left]
+        cv = np.zeros((FRAME_H, W, 4), np.uint8)
+        cv[top:top + h, dx0:dx1] = src[:, dx0 - left:dx1 - left]
         Image.fromarray(cv).save(f'{DST}/f{p:03d}.png', optimize=True)
 
         cut = 1 - (dx1 - dx0) / w

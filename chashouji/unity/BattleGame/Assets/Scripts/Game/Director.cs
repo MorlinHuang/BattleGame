@@ -92,7 +92,7 @@ public class Director : MonoBehaviour {
 
         frames = new FrameView();
         frames.Init(root, 30);
-        FrameInfo = $"关键帧 {frames.Loaded}/{FrameView.N} 张 · 每 {FrameView.STEP}%";
+        FrameInfo = $"{frames.Loaded}/{FrameView.N} 档 · 每 1%";
         GameLog.Line(FrameInfo);
 
         lineOver = new LineView(root, 40, 0.42f);   // 角色排 30，这一遍盖在他们身上

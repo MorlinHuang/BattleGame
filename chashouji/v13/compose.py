@@ -5,19 +5,23 @@
 就会多出一套会各自漂移的真源 —— 之前就是这样，预览里的人物比引擎里大一圈。
 """
 import os
+import re
 
 from PIL import Image, ImageDraw, ImageFont
 
-SRC = '../unity/BattleGame/Assets/StreamingAssets/art/frames'
+SRC = '../unity/BattleGame/Assets/Resources/frames'
 BG = '../web/assets/bg.jpg'
-PS = list(range(0, 101, 5))
+PS = sorted(int(n[1:4]) for n in os.listdir(SRC) if re.fullmatch(r'f\d{3}\.png', n))
 FONT = '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc'
+
+
+W, H, FRAME_TOP = 960, 1334, 308      # 帧纹理只覆盖人物那条横带，与 export_unity 同值
 
 
 def frame(p):
     ch = Image.open(f'{SRC}/f{p:03d}.png')
-    bg = Image.open(BG).convert('RGBA').resize(ch.size, Image.LANCZOS)
-    bg.alpha_composite(ch)
+    bg = Image.open(BG).convert('RGBA').resize((W, H), Image.LANCZOS)
+    bg.alpha_composite(ch, (0, FRAME_TOP))
     return bg.convert('RGB')
 
 
@@ -27,8 +31,10 @@ def main():
         frame(p).save(f'frames/p{p:03d}.jpg', quality=90)
 
     f = ImageFont.truetype(FONT, 26)
+    every5 = [p for p in PS if p % 5 == 0]
     for tag, sel, cols in (('五档', [5, 25, 50, 75, 95], 5),
-                           ('21档总览', PS, 11)):
+                           (f'每5%总览', every5, 11),
+                           ('连续段42-52', [p for p in PS if 42 <= p <= 52], 11)):
         tw = 430 if cols == 5 else 250
         ims = [Image.open(f'frames/p{p:03d}.jpg') for p in sel]
         th = round(ims[0].height * tw / ims[0].width)

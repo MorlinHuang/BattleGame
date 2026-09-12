@@ -6,6 +6,7 @@
  */
 const W = 960, H = 1334;
 const TOP = 128, BOT = 1232, MID = 480;
+const FRAME_TOP = 308, FRAME_W = 960, FRAME_H = 900;  // 帧纹理只覆盖人物那条横带
 const ROWS = 15;
 const GREEN = [126, 217, 87], RED = [255, 72, 72];
 
@@ -78,7 +79,8 @@ const heatAt = (y) => clamp(sampleRow(FX.rowHeat, y), 0, 1);
 const phonePos = () => [frontAt(FX.phoneY) + FX.jit, FX.phoneY];
 
 /* ---------- 角色：预渲染关键帧 ---------- */
-/* 0~100 每 5% 一张画好的帧。从网格变形改走帧序列，是因为两个人抢同一部
+/* 0~100 每 1% 一张。其中 28 张是生图画的关键档，其余由 interp_frames.py 用
+   光流从相邻关键档插出来。从网格变形改走帧序列，是因为两个人抢同一部
    手机时，肩、肘、腕的相对关系每一档都不一样 —— 这种成对的姿态用一套骨骼
    去凑，永远是在"手够不到机身"和"肘折过头"之间取舍。
 
@@ -86,12 +88,23 @@ const phonePos = () => [frontAt(FX.phoneY) + FX.jit, FX.phoneY];
    一起就是两副骨架互相穿透的重影，越是姿态差得远的档位越糊。硬切虽然跳，
    但每一帧都是清清楚楚的一张画。 */
 class FrameSeq {
-  constructor(imgs) { this.imgs = imgs; this.step = 100 / (imgs.length - 1); }
+  /* imgs 是 0~100 共 101 项，缺的那几档是 null —— 姿态跨度太大的区间光流插
+     不出干净的中间帧（会长出两个红发夹），只能等生图补上。缺档先映射到最近
+     的邻居，画面照常，只是那里的跳变还是原来的大小。 */
+  constructor(imgs) {
+    this.imgs = imgs;
+    this.map = imgs.map((im, i) => {
+      if (im) return i;
+      let best = -1, bd = 1e9;
+      imgs.forEach((o, j) => { const d = Math.abs(j - i); if (o && d < bd) { bd = d; best = j; } });
+      return best;
+    });
+  }
 
   draw(ctx, p, offsetX) {
-    const i = clamp(Math.round(clamp(p, 0, 100) / this.step), 0, this.imgs.length - 1);
-    ctx.drawImage(this.imgs[i], offsetX, 0, W, H);
-    this.shown = i * this.step;
+    const i = this.map[clamp(Math.round(clamp(p, 0, 100)), 0, 100)];
+    ctx.drawImage(this.imgs[i], offsetX, FRAME_TOP, FRAME_W, FRAME_H);
+    this.shown = i;
   }
 }
 
@@ -233,13 +246,14 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
   const bctx = cvBg.getContext('2d'), cctx = cvCh.getContext('2d'), fctx = cvFx.getContext('2d');
   initTex();
 
-  const NF = 21;
-  const srcs = ['assets/bg.jpg'];
-  for (let i = 0; i < NF; i++) srcs.push(`assets/frames/f${String(i * 5).padStart(3, '0')}.png`);
-  const imgs = await Promise.all(srcs.map(load));
-  const bg = imgs[0];
-  const seq = new FrameSeq(imgs.slice(1));
-  document.getElementById('msg').textContent = `关键帧 ${NF} 张 · 每 ${100 / (NF - 1)}%`;
+  const bg = await load('assets/bg.jpg');
+  /* 每 1% 一张。缺的档位解码失败是预期内的，取 null 交给 FrameSeq 映射到邻居。 */
+  const frames = await Promise.all(
+    Array.from({ length: 101 }, (_, p) =>
+      load(`assets/frames/f${String(p).padStart(3, '0')}.png`).catch(() => null)));
+  const seq = new FrameSeq(frames);
+  document.getElementById('msg').textContent =
+    `${frames.filter(Boolean).length}/101 档 · 每 1%`;
 
   const Q = new URLSearchParams(location.search);
   if (Q.has('p')) { S.p = clamp(+Q.get('p'), 0, 100); S.auto = false; }
