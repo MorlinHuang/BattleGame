@@ -18,8 +18,12 @@ const P = {
   drag: 0.78,      // 角色跟随手机的比例（拔河：赢方后退、输方被拖，间距不变）
   tilt: 1.55, bulge: 46, linkW: 0.80, shapeRate: 2.6,
   lean: 0.24,      // 躯干最大倾角(rad)
-  phoneY: 515, phoneW: 112, phoneH: 214,   // 放大：屏幕是题材层主角，且太小的机身会被两只手完全盖住
-  girlX: 270, boyX: 676, footY: 1125,
+  phoneY: 560, phoneW: 112, phoneH: 214,   // 放大：屏幕是题材层主角，且太小的机身会被两只手完全盖住
+  /* 手机高度与两人站位是一组联动的解：手要握在机身上而不是盖在机身上，
+     胳膊就得把自己那截手掌的长度让出来 —— 站得太近，肘只能折到 60 度，
+     2D 切片的肘窝一折就皱。把手机降到腰胯之间、两人各退开一点，两条
+     胳膊就落在近乎伸直的自然区间里，顺带把画面下半截的空地填上。 */
+  girlX: 205, boyX: 742, footY: 1125,
   rug: { top: 738, bot: 1128, tl: 88, tr: 872, bl: 28, br: 912 },  // 底版里地毯四角
   girlH: 760, boyH: 770,
 };
@@ -31,6 +35,10 @@ const FX = {
   struggle: 1, girlX: P.girlX, boyX: P.boyX, jit: 0,
 };
 const DBG = { wire: false, bones: false, weights: false, calib: false };
+
+/* 手骨上"握住东西"的位置（0=腕，1=指尖）。东西是攥在手心里的，既不是顶在
+   腕上，也不是挑在指尖上 —— 握点落在手心，指尖才会自然搭过机身另一侧。 */
+const PALM = 0.46;
 
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
@@ -105,10 +113,17 @@ class Actor {
     const s = this.scale, x = this.side < 0 ? FX.girlX : FX.boyX;
     return M.mul(M.trs(x, P.footY, 0, s, s), M.trs(-this.def.anchorX * this.sk.imgW, -this.sk.imgH, 0));
   }
-  /* 摆姿势：躯干倾角由劣势程度决定；只有靠中线那只手(armA)用 IK 扣住手机，
-     一人抓机身一端，上下错开 —— 两只手掌各约 70px 宽，都去抓同一处，
+  /* 摆姿势：躯干倾角由劣势程度决定；只有靠中线那只手(armA)用 IK 握住手机，
+     一人握机身一端，上下错开 —— 两只手掌各约 70px 宽，都去抓同一处，
      必然叠成一团谁也读不出；外侧那只手离手机太远，硬拽过去就是把袖子
-     拉成面条，所以它整条作为刚体跟着躯干走，一点都不变形。 */
+     拉成面条，所以它整条作为刚体跟着躯干走，一点都不变形。
+
+     IK 的末端是腕，但真正该落到机身上的是手心。直接把腕钉在机身上，
+     整只手连同张开的五指就一路盖过屏幕（手骨有大半根前臂那么长）——
+     屏幕是这个玩法的题材层主角，盖住了玩法本身就没了；而且腕要够到那么
+     远，胳膊只能绷成一条直线还得再拉长，肘和袖口跟着一起抻变形。所以
+     标定的 grip 是"机身被握住的那个点"，腕沿肩→握点方向后退 PALM 段
+     手骨倒推出来，手骨再单独转向握点 —— 手是刚体，不跟着前臂的朝向乱指。 */
   pose(bias) {
     const sk = this.sk, inv = M.inv(this.model);
     sk.reset();
@@ -116,12 +131,26 @@ class Actor {
     const lean = -bias * P.lean + Math.sin(S.t * 11 + ph) * 0.012 * FX.struggle;
     sk.byName('torso').delta = lean;
     sk.byName('head').delta = -lean * 0.55;
-    sk.solve();   // armB 不设 delta：整条手臂作为刚体跟着躯干走
+    /* 另一条手臂整条作为刚体跟着躯干走，只绕肩拧一个固定的角度：立绘里
+       两只手本来就伸向同一处，不错开就叠成一团分不出指头的肉。拧开之后
+       一人一上一下攥住机身两处，"两只手都在抢"才读得出来。 */
+    sk.byName('armB').delta = this.def.armBSwing;
+    sk.solve();
 
     const [px, py] = phonePos(), ro = FX.phoneRot;
-    const co = Math.cos(ro), si = Math.sin(ro);
-    const grip = ([ox, oy]) => M.apply(inv, px + ox * co - oy * si, py + ox * si + oy * co);
-    sk.ik('armA_up', 'armA_fore', ...grip(this.def.grip.A), this.bendA);
+    const co = Math.cos(ro), si = Math.sin(ro), [ox, oy] = this.def.grip.A;
+    const [gx, gy] = M.apply(inv, px + ox * co - oy * si, py + ox * si + oy * co);
+    const [sx, sy] = sk.headOf('armA_up');
+    const hand = sk.byName('armA_hand'), fore = sk.byName('armA_fore');
+    const dx = gx - sx, dy = gy - sy, d = Math.hypot(dx, dy) || 1, back = hand.len * PALM;
+    sk.ik('armA_up', 'armA_fore', gx - dx / d * back, gy - dy / d * back, this.bendA);
+    sk.solve();
+    const [wx, wy] = sk.headOf('armA_hand');
+    /* 手腕最多别扭到这个角度。手是刚体，硬拧过头，腕口那一圈顶点一半跟着
+       手转、一半还归前臂，接缝就被剪开了 —— 手心差几个像素没人看得出来，
+       腕上豁一道口子一眼就看得见。 */
+    const turn = Math.atan2(gy - wy, gx - wx) - fore.poseAng - hand.restLocalAng;
+    hand.delta = clamp(Math.atan2(Math.sin(turn), Math.cos(turn)), -0.30, 0.30);
     sk.solve();
   }
   draw(tint) { this.ren.draw(this.gpu, this.sk, this.model, tint, false); if (DBG.wire) this.ren.draw(this.gpu, this.sk, this.model, tint, true); }
@@ -350,7 +379,6 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     bctx.drawImage(bg, 0, 0, W, H);
     drawGround(bctx, bias);
     drawLine(bctx);
-    drawPhone(bctx);          // 画在角色层之下，双手才压得住机身
 
     gl.viewport(0, 0, W, H);
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
@@ -361,6 +389,10 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     if (!boy.hidden) boy.draw([...SHADE, clamp(bias, 0, 1) * .32]);
 
     fctx.clearRect(0, 0, W, H);
+    /* 机身画在角色层之上：手是张开的五指，无论怎么摆都会压掉一片屏幕，
+       而屏幕上的聊天记录正是这个玩法要给人看的东西。手落在机身两侧、
+       指尖伸进机身轮廓里被挡住，读起来就是"从后面攥住了它"。 */
+    drawPhone(fctx);
     drawRuler(fctx);
     drawHUD(fctx, S.p);
     if (DBG.bones) drawBones(fctx, actors);

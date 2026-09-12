@@ -106,14 +106,19 @@ class Skeleton {
 
   /* 两段 IK：让 fore 骨的末端落到 (tx,ty)。在 up 的父骨已解算后调用。
      够不到时沿臂轴等比拉伸（上限 maxStretch），mesh 变形的便宜要占。 */
+  /* 骨起点在当前姿势下的落点。手该沿哪个方向伸出去，得先知道肩落在哪。 */
+  headOf(name) {
+    const b = this.byName(name), p = b.parent >= 0 ? this.bones[b.parent] : null;
+    if (!p) return [b.hx, b.hy];
+    const w = M.mul(p.poseWorld, b.restLocal);
+    return [w.e, w.f];
+  }
+
   ik(upName, foreName, tx, ty, bend, maxStretch = 1.15, minReach = 0.58) {
     const up = this.byName(upName), fore = this.byName(foreName);
     const par = up.parent >= 0 ? this.bones[up.parent] : null;
-    if (par) { // 肩点随父骨走
-      const local = M.mul(up.restLocal, M.trs(0, 0, 0, 1, 1));
-      const w = M.mul(par.poseWorld, local);
-      up.sx = w.e; up.sy = w.f; up.parAng = par.poseAng;
-    } else { up.sx = up.hx; up.sy = up.hy; up.parAng = 0; }
+    [up.sx, up.sy] = this.headOf(upName);      // 肩点随父骨走
+    up.parAng = par ? par.poseAng : 0;
 
     let L1 = up.len, L2 = fore.len;
     const dx = tx - up.sx, dy = ty - up.sy;
