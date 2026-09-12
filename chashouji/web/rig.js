@@ -51,10 +51,13 @@ function boneField(px, py, b) {
   const t = L > 0 ? ((px - b.hx) * vx + (py - b.hy) * vy) / L : 0;
   const tc = t < 0 ? 0 : t > 1 ? 1 : t;
   const d = Math.hypot(px - (b.hx + vx * tc), py - (b.hy + vy * tc));
+  /* 沿轴收口是一个独立的衰减因子，不能拿它去缩整个胶囊：按比例缩半径的话，
+     实心核的边界会横着扫过肢体，同一排相邻两个顶点，一个还在核里权重满格、
+     一个已经掉出核外几乎归零 —— 肘和肩这种要弯折的接缝，就在那一格上被
+     剪开。乘成因子之后，权重沿骨轴一格一格匀着让给下一根骨。 */
   const k = 1 - Math.min(1, t < b.from ? (b.from - t) / b.capH : t > 1 ? (t - 1) / b.capT : 0);
-  const R = b.R * k, R0 = b.R0 * k;
-  if (d >= R) return 0;
-  return d <= R0 ? 1 : (R - d) / (R - R0);
+  if (k <= 0 || d >= b.R) return 0;
+  return k * (d <= b.R0 ? 1 : (b.R - d) / (b.R - b.R0));
 }
 
 // ---------- 骨架 ----------

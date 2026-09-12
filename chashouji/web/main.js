@@ -11,21 +11,29 @@ const GREEN = [126, 217, 87], RED = [255, 72, 72];
 
 const P = {
   curve: 1.55,     // 进度→位移的非线性，中段慢、末段快
-  /* half/drag/身高是一组联动的解，不能单独改：boy 的手臂比 girl 短 20%，
-     手机被拽到他那侧时够不到，靠加大 drag 让身体多跟一点补上；drag 大了
-     角色又要出画，于是把两人一起缩矮。手机相应放大，视觉重量不减。 */
-  half: 120,       // 手机最大偏移
-  drag: 0.78,      // 角色跟随手机的比例（拔河：赢方后退、输方被拖，间距不变）
+  /* half/drag/站位是一组联动的解，不能单独改。手机的行程有 2×half，可手臂
+     只在"肩到握点 = 0.6~0.95 倍臂长"这一小段里摆得自然：够不到就只能抻长
+     上臂（IK 会拉伸到 1.15 倍，胳膊看着像橡皮），折过头则肘窝挤成一团。
+     drag 让身体跟着手机走，把这 2×half 的行程压缩成 2×half×(1-drag) 落进
+     那一小段里 —— boy 的手臂比 girl 短 23%，可用区间更窄，drag 是按他定的。 */
+  half: 100,       // 手机最大偏移
+  drag: 0.86,      // 角色跟随手机的比例（拔河：赢方后退、输方被拖，间距不变）
   tilt: 1.55, bulge: 46, linkW: 0.80, shapeRate: 2.6,
-  lean: 0.24,      // 躯干最大倾角(rad)
-  phoneY: 560, phoneW: 112, phoneH: 214,   // 放大：屏幕是题材层主角，且太小的机身会被两只手完全盖住
-  /* 手机高度与两人站位是一组联动的解：手要握在机身上而不是盖在机身上，
-     胳膊就得把自己那截手掌的长度让出来 —— 站得太近，肘只能折到 60 度，
-     2D 切片的肘窝一折就皱。把手机降到腰胯之间、两人各退开一点，两条
-     胳膊就落在近乎伸直的自然区间里，顺带把画面下半截的空地填上。 */
-  girlX: 205, boyX: 742, footY: 1125,
+  /* 躯干最大倾角(rad)。它不只是姿态：躯干一转，肩就绕着腰划一段弧，肩到
+     握点的距离跟着变 —— 倾角 0.24 时这段弧有 ±50px，比手机行程被 drag 抵消
+     之后剩下的那点变化还大，两头一个折死一个抻长。倾角是按"肩能划多远"
+     反推出来的，不是按看着够不够狠。 */
+  lean: 0.12,
+  phoneY: 600, phoneW: 144, phoneH: 276,   // 屏幕是题材层主角，机身得比一只张开的手大：手掌连五指横着就有 120px
+  /* 站位按"p=50 时肩到握点 = 0.80 倍臂长"反解出来，不是摆着好看就行：
+     再远一点，两条胳膊全程都在被 IK 抻长；再近一点，极端档肘要折到 58%
+     以下，2D 切片的肘窝一折就挤成一团。注意 IK 要够到的不是握点本身，而是
+     握点往回退 palm×手骨长 的那个腕位 —— 这一截先减掉再算，否则站位会系统
+     性地偏近。boy 的握点比 girl 低（他的肩本来就比机身高不了多少），所以他
+     站得比对称位置更靠里。 */
+  girlX: 177, boyX: 753, footY: 1125,
   rug: { top: 738, bot: 1128, tl: 88, tr: 872, bl: 28, br: 912 },  // 底版里地毯四角
-  girlH: 760, boyH: 770,
+  girlH: 700, boyH: 710,
 };
 
 const S = { p: 50, t: 0, auto: true };
@@ -35,10 +43,6 @@ const FX = {
   struggle: 1, girlX: P.girlX, boyX: P.boyX, jit: 0,
 };
 const DBG = { wire: false, bones: false, weights: false, calib: false };
-
-/* 手骨上"握住东西"的位置（0=腕，1=指尖）。东西是攥在手心里的，既不是顶在
-   腕上，也不是挑在指尖上 —— 握点落在手心，指尖才会自然搭过机身另一侧。 */
-const PALM = 0.46;
 
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
@@ -122,7 +126,7 @@ class Actor {
      整只手连同张开的五指就一路盖过屏幕（手骨有大半根前臂那么长）——
      屏幕是这个玩法的题材层主角，盖住了玩法本身就没了；而且腕要够到那么
      远，胳膊只能绷成一条直线还得再拉长，肘和袖口跟着一起抻变形。所以
-     标定的 grip 是"机身被握住的那个点"，腕沿肩→握点方向后退 PALM 段
+     标定的 grip 是"机身被手心握住的那个点"，腕沿肩→握点方向后退 palm 段
      手骨倒推出来，手骨再单独转向握点 —— 手是刚体，不跟着前臂的朝向乱指。 */
   pose(bias) {
     const sk = this.sk, inv = M.inv(this.model);
@@ -131,10 +135,12 @@ class Actor {
     const lean = -bias * P.lean + Math.sin(S.t * 11 + ph) * 0.012 * FX.struggle;
     sk.byName('torso').delta = lean;
     sk.byName('head').delta = -lean * 0.55;
-    /* 另一条手臂整条作为刚体跟着躯干走，只绕肩拧一个固定的角度：立绘里
-       两只手本来就伸向同一处，不错开就叠成一团分不出指头的肉。拧开之后
-       一人一上一下攥住机身两处，"两只手都在抢"才读得出来。 */
-    sk.byName('armB').delta = this.def.armBSwing;
+    /* 另一条手臂不做 IK，两段各绕自己的关节拧一个固定角度：立绘里两只手
+       本来就伸向同一处，不错开就叠成一团分不出指头的肉。拧开之后一人一上
+       一下攥住机身两处，"两只手都在抢"才读得出来。 */
+    const [swUp, swFore] = this.def.armBSwing;
+    sk.byName('armB_up').delta = swUp;
+    sk.byName('armB_fore').delta = swFore;
     sk.solve();
 
     const [px, py] = phonePos(), ro = FX.phoneRot;
@@ -142,7 +148,7 @@ class Actor {
     const [gx, gy] = M.apply(inv, px + ox * co - oy * si, py + ox * si + oy * co);
     const [sx, sy] = sk.headOf('armA_up');
     const hand = sk.byName('armA_hand'), fore = sk.byName('armA_fore');
-    const dx = gx - sx, dy = gy - sy, d = Math.hypot(dx, dy) || 1, back = hand.len * PALM;
+    const dx = gx - sx, dy = gy - sy, d = Math.hypot(dx, dy) || 1, back = hand.len * this.def.palm;
     sk.ik('armA_up', 'armA_fore', gx - dx / d * back, gy - dy / d * back, this.bendA);
     sk.solve();
     const [wx, wy] = sk.headOf('armA_hand');
@@ -379,6 +385,11 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     bctx.drawImage(bg, 0, 0, W, H);
     drawGround(bctx, bias);
     drawLine(bctx);
+    /* 机身画在角色层之下，手才是压在它上面的 —— 这个玩法要读出来的就是
+       "两只手在抢同一部手机"，机身盖在手上，两只手就成了在机身旁边虚抓。
+       靠握点错开来保屏幕：她攥机身左上、他攥机身右中，各自只压住一角，
+       中间那条竖带上的聊天记录全程露着。 */
+    drawPhone(bctx);
 
     gl.viewport(0, 0, W, H);
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
@@ -389,10 +400,6 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     if (!boy.hidden) boy.draw([...SHADE, clamp(bias, 0, 1) * .32]);
 
     fctx.clearRect(0, 0, W, H);
-    /* 机身画在角色层之上：手是张开的五指，无论怎么摆都会压掉一片屏幕，
-       而屏幕上的聊天记录正是这个玩法要给人看的东西。手落在机身两侧、
-       指尖伸进机身轮廓里被挡住，读起来就是"从后面攥住了它"。 */
-    drawPhone(fctx);
     drawRuler(fctx);
     drawHUD(fctx, S.p);
     if (DBG.bones) drawBones(fctx, actors);
@@ -436,6 +443,17 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
       };
       const seen = new Set();
       lines.push((A.side < 0 ? 'girl' : 'boy') + '  超限边 ' + worst.length + ' 条');
+      /* IK 到底够没够到：骨在哪、手心该落在哪，只看画面猜不出来。
+         一律换算到画布坐标，跟机身中心 MID 直接对得上。 */
+      {
+        const w = ([x, y]) => M.apply(A.model, x, y).map(Math.round);
+        const hd = A.sk.byName('armA_hand');
+        const tip = M.apply(A.model, ...M.apply(hd.skin, hd.tx, hd.ty));
+        const [gx0, gy0] = phonePos(), [ox0, oy0] = A.def.grip.A;
+        lines.push('  肩' + w(A.sk.headOf('armA_up')) + ' 腕' + w(A.sk.headOf('armA_hand')) +
+          ' 手末' + tip.map(Math.round) + ' 握点' + [Math.round(gx0 + ox0), Math.round(gy0 + oy0)] +
+          ' 手末→握点 ' + Math.round(Math.hypot(tip[0] - gx0 - ox0, tip[1] - gy0 - oy0)) + 'px');
+      }
       /* 整块皮被搬到别处时边长并不变，超限边查不出来 —— 再按"位移比邻居
          多出多少"排一次，专抓这种平移型的错位。 */
       const odd = [];
@@ -514,8 +532,8 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     // 框跟着角色走，否则极端档人物移开了，框住的全是背景
     const cx0 = phonePos()[0] - 240;
     const boxes = [
-      [['中央 · 手机与四手', cx0, 395, 480, 350]],
-      [['girl 头', FX.girlX - 105, 309, 230, 295], ['boy 头', FX.boyX - 141, 293, 230, 295]],
+      [['中央 · 手机与四手', cx0, 455, 480, 350]],
+      [['girl 头', FX.girlX - 95, 380, 230, 295], ['boy 头', FX.boyX - 131, 368, 230, 295]],
       [['只有 girl', cx0, 395, 480, 350], ['只有 boy', cx0, 395, 480, 350]],
     ];
     /* 单人渲染：画面上多出来的一块形变到底是谁身上的，两人叠在一起时
@@ -527,7 +545,8 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
       const c = document.createElement('canvas');
       c.width = 480; c.height = 350;
       const g2 = c.getContext('2d');
-      for (const cv of [cvBg, cvCh, cvFx]) g2.drawImage(cv, cx0, 395, 480, 350, 0, 0, 480, 350);
+      /* 单人格不画特效层：手机盖在角色之上，而这一格正是用来看手怎么摆的 */
+      for (const cv of [cvBg, cvCh]) g2.drawImage(cv, cx0, 455, 480, 350, 0, 0, 480, 350);
       solo[A.side < 0 ? '只有 girl' : '只有 boy'] = c;
     }
     for (const B of actors) B.hidden = false;
