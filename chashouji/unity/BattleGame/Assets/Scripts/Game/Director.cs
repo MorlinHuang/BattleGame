@@ -22,28 +22,34 @@ public class Director : MonoBehaviour {
 
     public class Params {
         public float curve = 1.55f;   // 进度→位移的非线性，中段慢、末段快
-        /* half/drag/身高是一组联动的解，不能单独改：boy 的手臂比 girl 短 20%，
-           手机被拽到他那侧时够不到，靠加大 drag 让身体多跟一点补上。 */
-        public float half = 120f;     // 手机最大偏移
-        public float drag = 0.78f;    // 角色跟随手机的比例（赢方后退、输方被拖，间距不变）
+        /* half/drag/站位是一组联动的解，不能单独改。手机的行程有 2×half，可手臂
+           只在"肩到握点 = 0.6~0.95 倍臂长"这一小段里摆得自然：够不到就只能抻长
+           上臂（IK 会拉伸到 1.15 倍，胳膊看着像橡皮），折过头则肘窝挤成一团。
+           drag 让身体跟着手机走，把这 2×half 的行程压缩成 2×half×(1-drag) 落进
+           那一小段里 —— boy 的手臂比 girl 短 23%，可用区间更窄，drag 是按他定的。 */
+        public float half = 100f;     // 手机最大偏移
+        public float drag = 0.86f;    // 角色跟随手机的比例（赢方后退、输方被拖，间距不变）
         public float tilt = 1.55f, bulge = 46f, linkW = 0.80f, shapeRate = 2.6f;
-        public float lean = 0.24f;    // 躯干最大倾角(rad)
-        public float phoneY = 560f, phoneW = 112f, phoneH = 214f;
+        /* 躯干最大倾角(rad)。它不只是姿态：躯干一转，肩就绕着腰划一段弧，肩到
+           握点的距离跟着变 —— 倾角 0.24 时这段弧有 ±50px，比手机行程被 drag 抵消
+           之后剩下的那点变化还大，两头一个折死一个抻长。 */
+        public float lean = 0.12f;
+        public float phoneY = 600f, phoneW = 144f, phoneH = 276f;
         /* 手机高度与两人站位是一组联动的解：手要握在机身上而不是盖在机身上，胳膊
            就得把自己那截手掌的长度让出来 —— 站得太近，肘只能折到 60 度，2D 切片的
            肘窝一折就皱。 */
-        public float girlX = 205f, boyX = 742f, footY = 1125f;
+        public float girlX = 177f, boyX = 753f, footY = 1125f;
         public float rugTop = 738f, rugBot = 1128f, rugTL = 88f, rugTR = 872f, rugBL = 28f, rugBR = 912f;
-        public float girlH = 760f, boyH = 770f;
+        public float girlH = 700f, boyH = 710f;
     }
 
     public class State { public float p = 50f, t = 0f; public bool auto = true; }
 
     public class Fx {
-        public float phoneX = MID, phoneY = 560f, phoneRot = 0f;
+        public float phoneX = MID, phoneY = 600f, phoneRot = 0f;
         public float[] rowOff = new float[ROWS];
         public float[] rowHeat = new float[ROWS];
-        public float struggle = 1f, girlX = 205f, boyX = 742f, jit = 0f;
+        public float struggle = 1f, girlX = 177f, boyX = 753f, jit = 0f;
     }
 
     public class Dbg { public bool wire, bones; }
@@ -112,7 +118,9 @@ public class Director : MonoBehaviour {
         MeshInfo = $"网格 {girl.rm.triCount + boy.rm.triCount} 三角形 / {girl.rm.verts + boy.rm.verts} 顶点";
         GameLog.Line(MeshInfo);
 
-        phone = new PhoneView(root, 40);
+        /* 机身排在角色之下，手才是压在它上面的 —— 这个玩法要读出来的就是"两只
+           手在抢同一部手机"，机身盖在手上，两只手就成了在机身旁边虚抓。 */
+        phone = new PhoneView(root, 25);
         ruler = new RulerView(root, 50);
         hud = new HudView(root, 60);
         bonesView = new BonesView(root, 70);

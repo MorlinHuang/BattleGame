@@ -58,11 +58,14 @@ public class Skeleton {
         float t = L > 0f ? ((px - b.hx) * vx + (py - b.hy) * vy) / L : 0f;
         float tc = t < 0f ? 0f : (t > 1f ? 1f : t);
         float d = MathX.Hypot(px - (b.hx + vx * tc), py - (b.hy + vy * tc));
+        /* 沿轴收口是一个独立的衰减因子，不能拿它去缩整个胶囊：按比例缩半径的话，
+           实心核的边界会横着扫过肢体，同一排相邻两个顶点，一个还在核里权重满格、
+           一个已经掉出核外几乎归零 —— 肘和肩这种要弯折的接缝，就在那一格上被
+           剪开。乘成因子之后，权重沿骨轴一格一格匀着让给下一根骨。 */
         float over = t < b.from ? (b.from - t) / b.capH : (t > 1f ? (t - 1f) / b.capT : 0f);
         float k = 1f - Mathf.Min(1f, over);
-        float R = b.R * k, R0 = b.R0 * k;
-        if (d >= R) return 0f;
-        return d <= R0 ? 1f : (R - d) / (R - R0);
+        if (k <= 0f || d >= b.R) return 0f;
+        return k * (d <= b.R0 ? 1f : (b.R - d) / (b.R - b.R0));
     }
 
     public void Reset() { foreach (var b in bones) { b.delta = 0f; b.scale = 1f; } }

@@ -18,9 +18,6 @@ public class ActorView {
     Color32[] wireCols;
     int bendA;
 
-    /* 手骨上"握住东西"的位置（0=腕，1=指尖）。东西是攥在手心里的，既不是顶在
-       腕上，也不是挑在指尖上 —— 握点落在手心，指尖才会自然搭过机身另一侧。 */
-    public const float PALM = 0.46f;
     const int COLS = 60, ROWS_MESH = 88;
 
     public void Init(CharDef d, Texture2D tex, int side, Transform parent, int order) {
@@ -77,8 +74,8 @@ public class ActorView {
        IK 的末端是腕，但真正该落到机身上的是手心。直接把腕钉在机身上，整只手连同
        张开的五指就一路盖过屏幕（手骨有大半根前臂那么长）—— 屏幕是这个玩法的题材
        层主角，盖住了玩法本身就没了；而且腕要够到那么远，胳膊只能绷成一条直线还得
-       再拉长，肘和袖口跟着一起抻变形。所以标定的 grip 是"机身被握住的那个点"，腕
-       沿肩→握点方向后退 PALM 段手骨倒推出来，手骨再单独转向握点 —— 手是刚体，
+       再拉长，肘和袖口跟着一起抻变形。所以标定的 grip 是"机身被手心握住的那个点"，
+       腕沿肩→握点方向后退 palm 段手骨倒推出来，手骨再单独转向握点 —— 手是刚体，
        不跟着前臂的朝向乱指。 */
     public void Pose(float bias) {
         var inv = M2.Inv(Model);
@@ -88,9 +85,10 @@ public class ActorView {
                    + Mathf.Sin(Director.S.t * 11f + ph) * 0.012f * Director.FX.struggle;
         sk.ByName("torso").delta = lean;
         sk.ByName("head").delta = -lean * 0.55f;
-        /* 另一条手臂整条作为刚体跟着躯干走，只绕肩拧一个固定的角度：立绘里两只手
-           本来就伸向同一处，不错开就叠成一团分不出指头的肉。 */
-        sk.ByName("armB").delta = def.armBSwing;
+        /* 另一条手臂不做 IK，两段各绕自己的关节拧一个固定角度：立绘里两只手本来
+           就伸向同一处，不错开就叠成一团分不出指头的肉。 */
+        sk.ByName("armB_up").delta = def.armBSwing.x;
+        sk.ByName("armB_fore").delta = def.armBSwing.y;
         sk.Solve();
 
         Vector2 pp = Director.PhonePos();
@@ -102,7 +100,7 @@ public class ActorView {
         var hand = sk.ByName("armA_hand"); var fore = sk.ByName("armA_fore");
         float dx = g.x - sh.x, dy = g.y - sh.y;
         float d = MathX.Hypot(dx, dy); if (d <= 0f) d = 1f;
-        float back = hand.len * PALM;
+        float back = hand.len * def.palm;
         sk.IK("armA_up", "armA_fore", g.x - dx / d * back, g.y - dy / d * back, bendA);
         sk.Solve();
 
