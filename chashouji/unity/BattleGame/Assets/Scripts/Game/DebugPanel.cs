@@ -51,8 +51,8 @@ public class DebugPanel : MonoBehaviour {
 
         var fv = Director.I.Frames;
         GUILayout.Label($"p={S.p:0.0}   对抗线x={Director.PhonePos().x:0}   {Director.I.Fps:0}fps");
-        GUILayout.Label($"{Director.I.FrameInfo}   当前 f{fv.ShownLo:000}+{fv.Blend:0.00}");
-        GUILayout.Label("角色是 0~100 每 5% 一张画好的关键帧，相邻两张按 p 交叉\n淡化；对抗线、刻度、地面辉光同读一个 p。");
+        GUILayout.Label($"{Director.I.FrameInfo}   当前 f{fv.Shown:000}");
+        GUILayout.Label("角色是 0~100 每 5% 一张画好的关键帧，按 p 取最近的一张\n硬切；对抗线、刻度、地面辉光同读一个 p。");
         GUI.DragWindow();
     }
 }

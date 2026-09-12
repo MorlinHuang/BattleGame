@@ -3,34 +3,32 @@ using UnityEngine;
 
 namespace Chashouji {
 
-/* 角色层：0~100 每 5% 一张预渲染帧，按 p 取。
+/* 角色层：0~100 每 5% 一张预渲染帧，按 p 取最近的一张硬切。
  *
  * 从网格变形改走帧序列，是因为两个人抢同一部手机时，肩、肘、腕的相对关系每
  * 一档都不一样 —— 这种成对的姿态用一套骨骼去凑，永远是在"手够不到机身"和
  * "肘折过头"之间取舍，而画好的帧没有这个问题：谁跪下、谁后仰、头发甩向哪
  * 边，都是画里就定死的。
  *
- * 相邻两帧交叉淡化：先把低档那张按不透明画满，再把高档那张按插值系数叠上去。
- * 两张都按系数画的话，重叠处的 alpha 会互相乘出一片半透明，人就成了能看见
- * 背景的影子。
+ * 不做相邻帧的交叉淡化：两张画的是不同姿态而不是同一姿态的不同时刻，叠在一
+ * 起就是两副骨架互相穿透的重影，越是姿态差得远的档位越糊。硬切虽然跳，但每
+ * 一帧都是清清楚楚的一张画。
  */
 public class FrameView {
     public const int STEP = 5, N = 21;
 
     readonly Texture2D[] tex = new Texture2D[N];
-    MeshObj lo, hi;
+    MeshObj obj;
 
     public int Loaded { get; private set; }
-    public int ShownLo { get; private set; }
-    public float Blend { get; private set; }
+    public int Shown { get; private set; }
 
     public void Init(Transform parent, int order) {
         for (int i = 0; i < N; i++) {
             tex[i] = LoadFrame(i * STEP);
             if (tex[i] != null) Loaded++;
         }
-        lo = Gfx.NewMesh("actors_lo", parent, Gfx.NewAlphaMat(), order);
-        hi = Gfx.NewMesh("actors_hi", parent, Gfx.NewAlphaMat(), order + 1);
+        obj = Gfx.NewMesh("actors", parent, Gfx.NewAlphaMat(), order);
     }
 
     static Texture2D LoadFrame(int p) {
@@ -46,21 +44,15 @@ public class FrameView {
     }
 
     public void Rebuild(float p, float offsetX) {
-        float f = Mathf.Clamp(p, 0f, 100f) / STEP;
-        int i = (int)MathX.Clamp(Mathf.Floor(f), 0, N - 2);
-        float t = f - i;
-        ShownLo = i * STEP; Blend = t;
+        int i = (int)MathX.Clamp(Mathf.Round(Mathf.Clamp(p, 0f, 100f) / STEP), 0, N - 1);
+        Shown = i * STEP;
 
-        lo.SetTexture(tex[i]);
-        Quad(lo.mesh, offsetX, 1f);
-        lo.Visible = tex[i] != null;
-
-        hi.SetTexture(tex[i + 1]);
-        Quad(hi.mesh, offsetX, t);
-        hi.Visible = tex[i + 1] != null && t > 0.004f;
+        obj.SetTexture(tex[i]);
+        Quad(obj.mesh, offsetX);
+        obj.Visible = tex[i] != null;
     }
 
-    static void Quad(Mesh m, float x, float a) {
+    static void Quad(Mesh m, float x) {
         float W = Director.W, H = Director.H;
         m.Clear();
         m.vertices = new[] {
@@ -68,7 +60,7 @@ public class FrameView {
             new Vector3(x + W, -H, 0), new Vector3(x, -H, 0),
         };
         m.uv = new[] { new Vector2(0, 1), new Vector2(1, 1), new Vector2(1, 0), new Vector2(0, 0) };
-        var c = (Color32)new Color(1f, 1f, 1f, Mathf.Clamp01(a));
+        var c = (Color32)Color.white;
         m.colors32 = new[] { c, c, c, c };
         m.triangles = new[] { 0, 1, 2, 0, 2, 3 };
     }

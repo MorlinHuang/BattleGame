@@ -82,20 +82,16 @@ const phonePos = () => [frontAt(FX.phoneY) + FX.jit, FX.phoneY];
    手机时，肩、肘、腕的相对关系每一档都不一样 —— 这种成对的姿态用一套骨骼
    去凑，永远是在"手够不到机身"和"肘折过头"之间取舍。
 
-   相邻两帧交叉淡化：先把低档那张按不透明画满，再把高档那张按插值系数叠
-   上去。两张都按系数画的话，重叠处的 alpha 会互相乘出一片半透明，人就成
-   了能看见背景的影子。 */
+   不做相邻帧的交叉淡化：两张画的是不同姿态而不是同一姿态的不同时刻，叠在
+   一起就是两副骨架互相穿透的重影，越是姿态差得远的档位越糊。硬切虽然跳，
+   但每一帧都是清清楚楚的一张画。 */
 class FrameSeq {
   constructor(imgs) { this.imgs = imgs; this.step = 100 / (imgs.length - 1); }
 
   draw(ctx, p, offsetX) {
-    const f = clamp(p, 0, 100) / this.step;
-    const i = clamp(Math.floor(f), 0, this.imgs.length - 2), t = f - i;
-    ctx.globalAlpha = 1;
+    const i = clamp(Math.round(clamp(p, 0, 100) / this.step), 0, this.imgs.length - 1);
     ctx.drawImage(this.imgs[i], offsetX, 0, W, H);
-    if (t > 0.004) { ctx.globalAlpha = t; ctx.drawImage(this.imgs[i + 1], offsetX, 0, W, H); }
-    ctx.globalAlpha = 1;
-    this.shown = i * this.step; this.blend = t;
+    this.shown = i * this.step;
   }
 }
 
@@ -312,7 +308,7 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     derive(dt);
     render();
     document.getElementById('stat').textContent =
-      `p=${S.p.toFixed(1)}  对抗线x=${phonePos()[0].toFixed(0)}  f${String(seq.shown).padStart(3, '0')}+${seq.blend.toFixed(2)}  ${fps.toFixed(0)}fps`;
+      `p=${S.p.toFixed(1)}  对抗线x=${phonePos()[0].toFixed(0)}  f${String(seq.shown).padStart(3, '0')}  ${fps.toFixed(0)}fps`;
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

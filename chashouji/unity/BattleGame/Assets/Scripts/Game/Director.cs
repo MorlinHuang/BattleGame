@@ -95,7 +95,7 @@ public class Director : MonoBehaviour {
         FrameInfo = $"关键帧 {frames.Loaded}/{FrameView.N} 张 · 每 {FrameView.STEP}%";
         GameLog.Line(FrameInfo);
 
-        lineOver = new LineView(root, 40, 0.42f);   // 角色排 30/31，这一遍盖在他们身上
+        lineOver = new LineView(root, 40, 0.42f);   // 角色排 30，这一遍盖在他们身上
         ruler = new RulerView(root, 50);
         hud = new HudView(root, 60);
 
