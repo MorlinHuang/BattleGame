@@ -12,8 +12,8 @@ namespace Chashouji.EditorTools {
      1. 色彩空间设成 Gamma —— 网页版是画布 2D，颜色都按 sRGB 直接写的，
         工程若跑在 Linear，同样的数值会偏；shader 里虽然做了换算，但 Gamma 下
         才是逐像素一致。
-     2. 把两个自写 shader 塞进 Always Included Shaders —— 场景是运行时用代码搭的，
-        材质也是 new 出来的，打包器扫不到这两个 shader，出包后会静默变成洋红。
+     2. 把自写 shader 塞进 Always Included Shaders —— 场景是运行时用代码搭的，
+        材质也是 new 出来的，打包器扫不到这个 shader，出包后会静默变成洋红。
      3. 生成 Assets/Scenes/Main.unity 并填进 Build Settings。 */
 public static class BuildTool {
 
@@ -22,7 +22,7 @@ public static class BuildTool {
     [MenuItem("查手机/整备工程（色彩空间 + shader + 场景）")]
     public static void Setup() {
         SetColorSpace();
-        EnsureShaders();
+        EnsureShader();
         MakeScene();
         AssetDatabase.SaveAssets();
         Debug.Log("[BuildTool] 工程整备完成：" + SCENE_PATH);
@@ -42,23 +42,22 @@ public static class BuildTool {
         PlayerSettings.runInBackground = true;
     }
 
-    static void EnsureShaders() {
-        var want = new[] { Shader.Find(Gfx.VERTEX_SHADER), Shader.Find(Gfx.CHAR_SHADER) };
+    /* 角色层改走预渲染帧之后，运行时只剩顶点色这一个自定义 shader 了。
+       它只被代码 Shader.Find 引用，没有任何资源指向它，不登记进
+       Always Included 就会在打包时被剥掉，编辑器里正常、exe 里全是粉红。 */
+    static void EnsureShader() {
+        var sh = Shader.Find(Gfx.VERTEX_SHADER);
+        if (sh == null) { Debug.LogWarning("[BuildTool] 找不到 shader，编译过了吗？"); return; }
         var gs = AssetDatabase.LoadAssetAtPath<GraphicsSettings>("ProjectSettings/GraphicsSettings.asset");
         if (gs == null) { Debug.LogWarning("[BuildTool] 读不到 GraphicsSettings.asset"); return; }
         var so = new SerializedObject(gs);
         var arr = so.FindProperty("m_AlwaysIncludedShaders");
-        foreach (var sh in want) {
-            if (sh == null) { Debug.LogWarning("[BuildTool] 找不到 shader，编译过了吗？"); continue; }
-            bool has = false;
-            for (int i = 0; i < arr.arraySize; i++)
-                if (arr.GetArrayElementAtIndex(i).objectReferenceValue == sh) { has = true; break; }
-            if (has) continue;
-            arr.InsertArrayElementAtIndex(arr.arraySize);
-            arr.GetArrayElementAtIndex(arr.arraySize - 1).objectReferenceValue = sh;
-            Debug.Log("[BuildTool] Always Included Shaders += " + sh.name);
-        }
+        for (int i = 0; i < arr.arraySize; i++)
+            if (arr.GetArrayElementAtIndex(i).objectReferenceValue == sh) return;
+        arr.InsertArrayElementAtIndex(arr.arraySize);
+        arr.GetArrayElementAtIndex(arr.arraySize - 1).objectReferenceValue = sh;
         so.ApplyModifiedProperties();
+        Debug.Log("[BuildTool] Always Included Shaders += " + sh.name);
     }
 
     static void MakeScene() {
