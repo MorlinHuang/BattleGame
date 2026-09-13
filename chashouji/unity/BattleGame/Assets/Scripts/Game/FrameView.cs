@@ -29,6 +29,12 @@ public class FrameView {
     readonly Texture2D[] tex = new Texture2D[N];
     readonly int[] near = new int[N];
     MeshObj obj;
+    /* 命中染色单独一层，走相加混合。角色是预渲染帧、做不了受击变形，打击反馈
+       只能来自贴图之外：这一层用同一张帧当遮罩，所以只会盖在已经画出的角色像
+       素上，不会糊到背景 —— 等价于网页版的 source-atop。
+       （网页版那边是往角色上叠一层半透明纯色，这边是按角色自身颜色加亮 15%，
+       亮部加得多暗部加得少，读起来更像"被光扫了一下"。） */
+    MeshObj tintObj;
 
     public int Loaded { get; private set; }
     public int Shown { get; private set; }
@@ -49,27 +55,40 @@ public class FrameView {
         }
         if (Loaded == 0) GameLog.Line("Resources/frames 下一张帧都没有");
         obj = Gfx.NewMesh("actors", parent, Gfx.NewAlphaMat(), order);
+        tintObj = Gfx.NewMesh("actors_tint", parent, Gfx.NewAddMat(), order + 1);
+        tintObj.Visible = false;
     }
 
-    public void Rebuild(float p, float offsetX) {
+    /* punch 是缩放脉冲，tint/tintA 是命中染色，两者都由 Director 从 FX 读来。
+       缩放以脚底为锚：人挨了一下会"胀"一下，但脚不离地。 */
+    public void Rebuild(float p, float offsetX, float punch, Color tint, float tintA) {
         int i = near[(int)MathX.Clamp(Mathf.Round(Mathf.Clamp(p, 0f, 100f)), 0, N - 1)];
         Shown = i;
         obj.Visible = i >= 0;
+        tintObj.Visible = i >= 0 && tintA > 0.004f;
         if (i < 0) return;
 
         obj.SetTexture(tex[i]);
-        Quad(obj.mesh, offsetX);
+        Quad(obj.mesh, offsetX, punch, Color.white);
+        if (tintObj.Visible) {
+            tintObj.SetTexture(tex[i]);
+            Quad(tintObj.mesh, offsetX, punch, new Color(tint.r, tint.g, tint.b, tintA));
+        }
     }
 
-    static void Quad(Mesh m, float x) {
-        float W = Director.W, top = -FRAME_TOP, bot = -(FRAME_TOP + FRAME_H);
+    static void Quad(Mesh m, float x, float punch, Color col) {
+        float k = 1f + punch;
+        float w = Director.W * k, h = FRAME_H * k;
+        float foot = FRAME_TOP + FRAME_H;          // 脚底那条线，缩放的锚
+        float x0 = x + (Director.W - w) * 0.5f;
+        float top = -(foot - h), bot = -foot;
         m.Clear();
         m.vertices = new[] {
-            new Vector3(x, top, 0), new Vector3(x + W, top, 0),
-            new Vector3(x + W, bot, 0), new Vector3(x, bot, 0),
+            new Vector3(x0, top, 0), new Vector3(x0 + w, top, 0),
+            new Vector3(x0 + w, bot, 0), new Vector3(x0, bot, 0),
         };
         m.uv = new[] { new Vector2(0, 1), new Vector2(1, 1), new Vector2(1, 0), new Vector2(0, 0) };
-        var c = (Color32)Color.white;
+        var c = (Color32)col;
         m.colors32 = new[] { c, c, c, c };
         m.triangles = new[] { 0, 1, 2, 0, 2, 3 };
     }

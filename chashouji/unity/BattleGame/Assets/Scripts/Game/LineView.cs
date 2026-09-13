@@ -35,6 +35,9 @@ public class LineView {
         new Stop(1f,   C(255, 72, 72, 0f)),
     };
 
+    /// 只在 Director.LineMode==1 时显示；其余模式这一层整个藏起来
+    public bool Visible { get => obj.Visible; set => obj.Visible = value; }
+
     public LineView(Transform parent, int order, float strength = 1f) {
         obj = Gfx.NewMesh("line", parent, Gfx.NewAddMat(), order);
         k = strength;

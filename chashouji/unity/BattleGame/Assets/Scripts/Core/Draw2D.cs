@@ -19,8 +19,10 @@ public class Draw2D {
 
     public void Clear() { vs.Clear(); cs.Clear(); ts.Clear(); xf = M2.Id; xfOn = false; }
 
-    /// 之后加进来的点都先过这个变换（手机要绕自己中心转）
-    public void Push(float x, float y, float rot) { xf = M2.Trs(x, y, rot); xfOn = true; }
+    /// 之后加进来的点都先过这个变换（手机要绕自己中心转、弹幕残影要缩一点）
+    public void Push(float x, float y, float rot, float scale = 1f) {
+        xf = M2.Trs(x, y, rot, scale, scale); xfOn = true;
+    }
     public void Pop() { xf = M2.Id; xfOn = false; }
 
     int V(float x, float y, Color col) {
@@ -140,6 +142,61 @@ public class Draw2D {
             Tri(c0, ringA[i], ringA[i + 1]);
             Tri(ringA[i], ringB[i], ringB[i + 1]);
             Tri(ringA[i], ringB[i + 1], ringA[i + 1]);
+        }
+    }
+
+    /* 以给定圆心做扇形三角化。Poly 是从 pts[0] 出发扇形化的，只对凸多边形成立；
+       五角星是凹的，必须从中心出发才不会画出错乱的三角形。 */
+    public void PolyFan(float cx, float cy, IList<Vector2> pts, Color col) {
+        if (pts.Count < 3) return;
+        int c0 = V(cx, cy, col);
+        int prev = V(pts[0].x, pts[0].y, col);
+        for (int i = 1; i <= pts.Count; i++) {
+            var q = pts[i % pts.Count];
+            int cur = V(q.x, q.y, col);
+            Tri(c0, prev, cur);
+            prev = cur;
+        }
+    }
+
+    static readonly List<Vector2> ellBuf = new List<Vector2>();
+
+    /// 椭圆轮廓点。圆就是 rx == ry
+    public static List<Vector2> EllipsePts(float cx, float cy, float rx, float ry, int seg = 18) {
+        ellBuf.Clear();
+        for (int i = 0; i < seg; i++) {
+            float a = Mathf.PI * 2f * i / seg;
+            ellBuf.Add(new Vector2(cx + Mathf.Cos(a) * rx, cy + Mathf.Sin(a) * ry));
+        }
+        return ellBuf;
+    }
+
+    /// 实心椭圆（含圆）
+    public void Ellipse(float cx, float cy, float rx, float ry, Color col, int seg = 18) {
+        PolyFan(cx, cy, EllipsePts(cx, cy, rx, ry, seg), col);
+    }
+
+    static readonly List<Vector2> starBuf = new List<Vector2>();
+
+    /// 五角星轮廓点。内凹到 0.42 —— 再瘦读成海星，再胖读成花
+    public static List<Vector2> StarPts(float cx, float cy, float r, float rot) {
+        starBuf.Clear();
+        for (int i = 0; i < 10; i++) {
+            float a = rot - 1.5708f + i * 0.6283f;
+            float rr = (i % 2) != 0 ? r * 0.42f : r;
+            starBuf.Add(new Vector2(cx + Mathf.Cos(a) * rr, cy + Mathf.Sin(a) * rr));
+        }
+        return starBuf;
+    }
+
+    /// 椭圆环（描边，不填充）。竖屏里是贴着地面看的冲击环，所以纵向压扁
+    public void EllipseRing(float cx, float cy, float rx, float ry, float width, Color col, int seg = 30) {
+        Vector2 prev = new Vector2(cx + rx, cy);
+        for (int i = 1; i <= seg; i++) {
+            float a = Mathf.PI * 2f * i / seg;
+            var cur = new Vector2(cx + Mathf.Cos(a) * rx, cy + Mathf.Sin(a) * ry);
+            Segment(prev, cur, width, col);
+            prev = cur;
         }
     }
 

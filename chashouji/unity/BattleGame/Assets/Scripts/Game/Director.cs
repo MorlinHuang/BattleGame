@@ -38,8 +38,20 @@ public class Director : MonoBehaviour {
         public float phoneX = MID, phoneY = 560f;
         public float[] rowOff = new float[ROWS];
         public float[] rowHeat = new float[ROWS];
+        /* 冲击波，独立于常规形变。rowOff 管"谁在推"（慢、由进度决定），这个管
+           "刚刚挨了一下"（快、由事件决定）。混进一个数组的话，一次命中会被
+           shapeRate 的趋近吃掉大半，读不出撞击。 */
+        public float[] rowImp = new float[ROWS];
         public float struggle = 1f, actorX = 0f, jit = 0f;
+        public float hitX = 0f, hitV = 0f;      // 角色被推开的位移与速度
+        public float punch = 0f;                // 缩放脉冲
+        public Color tint = Color.white;        // 命中染色
+        public float tintA = 0f;
     }
+
+    /* 对抗线画法：0 全都不画 / 1 原发光柱 / 2 地面战线+顶部指针 / 3 只要指针。
+       默认 3，理由见 FrontMarkView.cs 顶部。 */
+    public static int LineMode = 3;
 
     public static Params P = new Params();
     public static State S = new State();
@@ -48,11 +60,18 @@ public class Director : MonoBehaviour {
 
     FrameView frames;
     LineView line, lineOver;
+    FrontMarkView frontMark;
+    AmmoView ammo;
     GroundView ground;
     RulerView ruler;
     HudView hud;
     Camera cam;
     MeshObj bgObj;
+    /* 震动只作用在"正在发生冲突的东西"上 —— 对抗线、角色、弹幕、粒子、刻度尺
+       全挂在 shakeRoot 下。房间和地毯不动：机位是固定的，整幅画面一起震就得把
+       背景放大做 overscan 才不露边，而背景一放大，地毯四角那组标定坐标就全偏
+       了。HUD 和白闪也不震，它们不在场景里。 */
+    Transform shakeRoot;
 
     float fps, frAcc; int frCount; int sweepDir = 1;
     public float Fps => fps;
@@ -88,15 +107,25 @@ public class Director : MonoBehaviour {
         BuildBgQuad(bgObj.mesh);
 
         ground = new GroundView(root, 10);
-        line = new LineView(root, 20);
+
+        shakeRoot = new GameObject("shake").transform;
+        shakeRoot.SetParent(root, false);
+
+        line = new LineView(shakeRoot, 20);
+        frontMark = new FrontMarkView();
+        frontMark.Init(shakeRoot, 22, 40);
 
         frames = new FrameView();
-        frames.Init(root, 30);
+        frames.Init(shakeRoot, 30);
         FrameInfo = $"{frames.Loaded}/{FrameView.N} 档 · 每 1%";
         GameLog.Line(FrameInfo);
 
-        lineOver = new LineView(root, 40, 0.42f);   // 角色排 30，这一遍盖在他们身上
-        ruler = new RulerView(root, 50);
+        lineOver = new LineView(shakeRoot, 40, 0.42f);   // 角色排 30，这一遍盖在他们身上
+        ruler = new RulerView(shakeRoot, 50);
+        ammo = new AmmoView();
+        ammo.Init(shakeRoot, 52);
+        // 实体粒子 54、发光粒子 55；白闪挂在不震的 root 上，排最顶
+        ParticleFx.Init(shakeRoot, 54, 55, root, 70);
         hud = new HudView(root, 60);
 
         gameObject.AddComponent<DebugPanel>();
@@ -162,7 +191,27 @@ public class Director : MonoBehaviour {
         FX.jit = Mathf.Sin(S.t * 47f) * 2.4f * FX.struggle;
         FX.phoneY = P.phoneY + Mathf.Sin(S.t * 9.3f) * 6f * FX.struggle - Mathf.Abs(bias) * 14f;
 
-        FX.actorX = (FX.phoneX - MID) * P.drag;
+        /* 角色被推开又站回来：弹簧-阻尼，不是单纯衰减 —— 单纯衰减只有"飘回去"，
+           看不出"被推动了"。挨一下给的是速度不是位移。 */
+        FX.hitV += -FX.hitX * FxTuning.HitK * dt;
+        FX.hitV *= Mathf.Pow(FxTuning.HitDamp, dt * 60f);
+        FX.hitX += FX.hitV * dt;
+        FX.actorX = (FX.phoneX - MID) * P.drag + FX.hitX;
+
+        FX.punch *= Mathf.Pow(FxTuning.PunchDecay, dt * 60f);
+        if (FX.punch < 0.002f) FX.punch = 0f;
+        FX.tintA *= Mathf.Pow(FxTuning.TintDecay, dt * 60f);
+        if (FX.tintA < 0.004f) FX.tintA = 0f;
+
+        // 对抗线上的冲击波：命中那一行注入冲量，随后沿线上下传播并衰减
+        var im = FX.rowImp;
+        var nim = new float[ROWS];
+        for (int r = 0; r < ROWS; r++) {
+            float nb = ((r > 0 ? im[r - 1] : im[r]) + (r < ROWS - 1 ? im[r + 1] : im[r])) * 0.5f;
+            nim[r] = (im[r] + (nb - im[r]) * MathX.Approach(dt, FxTuning.WaveSpread))
+                     * Mathf.Pow(FxTuning.WaveDecay, dt * 60f);
+        }
+        for (int r = 0; r < ROWS; r++) im[r] = Mathf.Abs(nim[r]) < 0.05f ? 0f : nim[r];
 
         var o = FX.rowOff;
         var next = new float[ROWS];
@@ -194,14 +243,71 @@ public class Director : MonoBehaviour {
     }
 
     // 对抗线在高度 y 处的横坐标 —— 光柱、刻度、地面辉光全读这一个函数
-    public static float FrontAt(float y) => FX.phoneX + SampleRow(FX.rowOff, y);
+    public static float FrontAt(float y) =>
+        FX.phoneX + SampleRow(FX.rowOff, y) + SampleRow(FX.rowImp, y);
     public static float HeatAt(float y) => MathX.Clamp(SampleRow(FX.rowHeat, y), 0f, 1f);
     public static Vector2 PhonePos() => new Vector2(FrontAt(FX.phoneY) + FX.jit, FX.phoneY);
 
+    // ---------- 命中：一次礼物落地时发生的全部事情 ----------
+
+    /* 一次命中同时动五样东西：粒子、对抗线冲量、角色位移与染色、屏幕震动、顿帧。
+       写成单一入口而不是散在各处，是因为这五样的强度必须一起缩放 —— 分开调的话
+       小礼物会震得比大礼物还狠，而观众读到的"这一下有多重"正是它们的合力。
+
+       side: +1 打向查岗党(左/女方)，-1 打向灭迹党(右/男方)
+       power: 1 点赞级  2 普通礼物  3 大礼物
+       数值全在 FxTuning.cs 的 Hit 区。 */
+    public static void Impact(int side, float y, int power, FxTuning.Recipe recipe) {
+        float s = FxTuning.PowerScale(power);
+        float x = FrontAt(y);
+
+        // 冲量注入命中高度那一行，方向朝被打的一侧
+        float d = MathX.Clamp((y - TOP) / (BOT - TOP), 0f, 1f) * (ROWS - 1);
+        int i0 = (int)MathX.Clamp(Mathf.Floor(d), 0, ROWS - 1);
+        FX.rowImp[i0] += -side * FxTuning.WaveInject * s;
+        if (i0 > 0) FX.rowImp[i0 - 1] += -side * FxTuning.WaveInjectSide * s;
+        if (i0 < ROWS - 1) FX.rowImp[i0 + 1] += -side * FxTuning.WaveInjectSide * s;
+
+        FX.hitV += -side * FxTuning.HitPush * s;
+        FX.punch = Mathf.Max(FX.punch, FxTuning.PunchAmount * s);
+        /* 染色只是"挨了一下"的提示，不是照明。超过 0.2 角色的线稿和睡衣花纹就被
+           洗掉了，而那正是这个玩法唯一能看的东西。 */
+        FX.tint = Recipes.TintOf(recipe);
+        FX.tintA = Mathf.Max(FX.tintA, FxTuning.TintAmount * Mathf.Min(1.4f, s));
+
+        ParticleFx.AddShake(FxTuning.ShakePerHit * s);
+        ParticleFx.AddFlash(FxTuning.Flash(power));
+        ParticleFx.HitStop(FxTuning.HitStop(power));
+
+        Recipes.Burst(recipe, x, y, side, s);
+    }
+
+    /* 弹幕撞上对抗线时由 AmmoView 回调。进度和特效都等真的撞上才结算 ——
+       玩法和演出走同一个事件，观众看到的因果关系才对得上。 */
+    public static void OnAmmoHit(FxTuning.Gift g, float y) {
+        S.p = MathX.Clamp(S.p + g.from * g.gain, 0f, 100f);
+        Impact(-g.from, y, g.power, g.recipe);
+    }
+
+    /// 面板上点一件礼物：只负责发射，撞上了才算数
+    public void SendGift(FxTuning.Gift g) {
+        S.auto = false;
+        AmmoView.Launch(g);
+    }
+
     void Update() {
-        float dt = Mathf.Min(0.05f, Time.deltaTime);
-        S.t += dt; frCount++; frAcc += dt;
+        float raw = Mathf.Min(0.05f, Time.deltaTime);
+        frCount++; frAcc += raw;
         if (frAcc >= 0.5f) { fps = frCount / frAcc; frCount = 0; frAcc = 0f; }
+
+        /* 顿帧冻住的是游戏逻辑（角色姿态、对抗线、进度、正在飞的弹幕），粒子照
+           真实时间走。两者用的是不同的时钟：定格是为了让观众多看两眼"他被打中
+           了"，而火花和闪光正是这一下的可视化 —— 把它们一起冻住，爆炸就会迟到
+           一百毫秒，读起来是"闪了一下、卡住、然后才炸开"。 */
+        float dt = ParticleFx.Tick(raw);
+        ParticleFx.Step(raw);
+        AmmoView.Step(dt);
+        S.t += dt;
 
         if (S.auto) {
             S.p += sweepDir * dt * 9f * (0.35f + Mathf.Abs(Mathf.Sin(S.t * 0.27f)) * 1.5f);
@@ -215,11 +321,26 @@ public class Director : MonoBehaviour {
     void Render() {
         if (frames == null) return;
         FitCamera();
-        ground.Rebuild((S.p - 50f) / 50f);
-        line.Rebuild();
-        frames.Rebuild(S.p, FX.actorX);
-        lineOver.Rebuild();
+        float bias = (S.p - 50f) / 50f;
+
+        // 震动：把"正在发生冲突"的那几层整体平移。画布 y 向下，落到世界要取负
+        shakeRoot.localPosition = new Vector3(ParticleFx.Off.x, -ParticleFx.Off.y, 0f);
+
+        ground.Rebuild(bias);
+
+        /* LineMode==1 的发光柱要画两遍：一遍在角色之下当背景光柱，一遍以更低
+           强度叠在角色之上 —— 两个人正好在中间抢东西，只画在下面的话它全程被
+           两具身体挡死。其余模式下这两层都藏起来。 */
+        bool useLine = LineMode == 1;
+        line.Visible = useLine;
+        lineOver.Visible = useLine;
+        if (useLine) { line.Rebuild(); lineOver.Rebuild(); }
+        frontMark.Rebuild(bias, LineMode);
+
+        frames.Rebuild(S.p, FX.actorX, FX.punch, FX.tint, FX.tintA);
         ruler.Rebuild();
+        ammo.Rebuild();
+        ParticleFx.Rebuild();
         hud.Rebuild(S.p);
     }
 

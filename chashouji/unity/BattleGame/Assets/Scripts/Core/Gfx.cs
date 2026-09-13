@@ -47,6 +47,11 @@ public static class Gfx {
         var mf = go.AddComponent<MeshFilter>();
         var mr = go.AddComponent<MeshRenderer>();
         var mesh = new Mesh { name = name };
+        /* 32 位索引。默认的 16 位上限是 65535 个顶点，平时够用，但粒子池满的时候
+           不够：一个带描边的碎片是圆角矩形填充 20 个顶点加一圈描边 80 个，1200
+           颗就是十二万。超了 Unity 会静默截断，画面上表现为"炸得最狠的时候有一
+           半粒子不见了"，而且只在极端情况下复现。 */
+        mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
         mesh.MarkDynamic();
         mf.sharedMesh = mesh;
         mr.sharedMaterial = mat;
