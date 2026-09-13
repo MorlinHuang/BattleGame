@@ -20,6 +20,8 @@
   button{background:#1b2029;color:#e8ecf2;border:1px solid #2c333f;border-radius:7px;
          padding:7px 13px;font-size:13px;cursor:pointer;font-family:inherit}
   button:hover{background:#242b36}
+  select{background:#1b2029;color:#e8ecf2;border:1px solid #2c333f;border-radius:6px;
+         padding:5px 7px;font-size:13px;font-family:inherit;cursor:pointer}
   #hitL{border-color:#4a7a33;color:#9ee87a} #hitR{border-color:#7a3a3a;color:#ff9b9b}
   label{display:flex;align-items:center;gap:5px;color:#aab3c0;font-size:13px;cursor:pointer;user-select:none}
   #stat,#msg{font:12px ui-monospace,Menlo,monospace;color:#6d7683}
@@ -44,12 +46,17 @@
     <button id="hitR">灭迹党 +7</button>
   </div>
   <div class="row">
-    <button id="hitSmall">点赞级 +2</button>
-    <button id="hitBig">大礼物 +18</button>
+    <button id="fxFeather">枕头·羽毛</button>
+    <button id="fxStar">打懵·星星</button>
+    <button id="fxDebris">砸碎·碎屑</button>
+  </div>
+  <div class="row">
+    <label>力度<select id="pw"><option value="1">点赞级</option><option value="2" selected>普通礼物</option><option value="3">大礼物</option></select></label>
+    <label>对抗线<select id="lv"><option value="0">全去掉</option><option value="1">原发光柱</option><option value="2">地面战线+指针</option><option value="3" selected>只要指针</option></select></label>
     <label><input id="auto" type="checkbox" checked>自动演示</label>
   </div>
   <div class="row"><span id="stat"></span><span id="msg"></span></div>
-  <div class="hint">角色是 0~100 每 1% 一张，其中 29 档生图画的、其余光流插出来，按 p 取最近的一张硬切；对抗线、刻度尺、地面分色同读一个 p，所以线永远对得上画面。<br>打一下会同时动五样：粒子、对抗线冲量、角色被推开、屏幕震动、顿帧 —— 强度一起缩放，所以"这一下有多重"读得出来。具体某件礼物炸出什么，在 main.js 的 RECIPE 表里定。</div>
+  <div class="hint">角色是 0~100 每 1% 一张，其中 29 档生图画的、其余光流插出来，按 p 取最近的一张硬切；对抗线、刻度尺、地面分色同读一个 p，所以线永远对得上画面。<br>打一下会同时动五样：粒子、对抗线冲量、角色被推开、屏幕震动、顿帧 —— 强度一起缩放，所以"这一下有多重"读得出来。具体某件礼物炸出什么，在 main.js 的 RECIPE 表里定。<br>粒子颜色被这张底图管着：客厅是浅绿墙+米色地板，白色在上面加不亮，所以发光的一律高饱和暖橙（靠色相跳出来）、实体的一律深色带描边（靠轮廓跳出来）。</div>
 </div>
 
 <script src="fx.js"></script>

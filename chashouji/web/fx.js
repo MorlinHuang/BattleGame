@@ -5,7 +5,7 @@
  * canvas，之后只 drawImage。
  *
  * 这里只有"怎么画"，没有"画什么"：具体某件礼物炸出羽毛还是星星，由 main.js
- * 的配方表决定。粒子形态刻意留成通用的五种，换题材皮不用动这个文件。
+ * 的配方表决定。粒子形态刻意留成通用的六种，换题材皮不用动这个文件。
  *
  * 打击感的四个手段都不需要改角色帧素材 —— 角色是预渲染帧，做不了受击变形，
  * 但顿帧、整体位移、染色、缩放这四样都作用在贴图之外：
@@ -71,12 +71,18 @@ const Particles = (function () {
 
   /* ---------- 粒子 ---------- */
 
-  /* kind 只有五种，都是形态而非题材：
+  /* kind 只有六种，都是形态而非题材：
        dot   光斑，会从 r 涨到 r1
        spark 沿速度方向的短亮线，速度越快拉得越长
        ring  扩散的椭圆环（贴地看所以压扁）
        chip  翻滚的小片，羽毛/塑料碎/纸屑都用它
-       soft  绒絮，普通混合，用作灰尘与绒毛 */
+       star  五角星，会旋转、会缩小
+       soft  绒絮，普通混合，用作灰尘与绒毛
+
+     chip 和 star 都吃 edge（描边色）。底图是明亮客厅，实体碎片不描边就糊
+     在浅绿墙和米色地板里 —— 这跟角色睡衣有线稿是同一个道理，赛璐璐风格
+     里"看得见"靠的是轮廓不是亮度。发光那三种（dot/spark/ring）没有描边，
+     它们本来就该是光。 */
   function spawn(o) {
     if (act.length >= MAX) return null;
     const p = pool.pop() || {};
@@ -90,6 +96,8 @@ const Particles = (function () {
     p.rot = o.rot || 0; p.vrot = o.vrot || 0;
     p.w = o.w || 0; p.h = o.h || 0;
     p.lw = o.lw || 3;
+    p.edge = o.edge || null;   // 实体描边色，明亮底图上靠它把碎片从背景里拔出来
+    p.spin = o.spin || 0;      // 绕出生点公转的半径，星星绕头转用
     p.sway = o.sway || 0;      // 横向摆幅，羽毛飘落用
     p.seed = Math.random() * 6.283;
     act.push(p);
@@ -119,26 +127,75 @@ const Particles = (function () {
     off.y = Math.sin(a) * shake * 0.6;   // 竖屏，横向震得多一点更像撞击
   }
 
+  /* 淡入是绝对时间，淡出才按寿命比例。
+     原来两头都按比例（前 15% 淡入），短命的火花看不出问题，但羽毛活 2 秒，
+     15% 就是 300 毫秒 —— 枕头炸开之后要等三分之一秒羽毛才显形，命中最该看
+     见东西的那一刻画面是空的。"入场"是一个固定的瞬间，与这个粒子打算活多久
+     没有任何关系。 */
+  const FADE_IN = 0.045;
+  function fade(p) {
+    const inn = Math.min(1, (p.maxLife - p.life) / FADE_IN);
+    const out = Math.min(1, p.life / (p.maxLife * 0.34));
+    return inn * out;
+  }
+
+  /* 五角星路径。半径 r，内凹到 0.42 —— 再瘦就变成海星，再胖就读成花。 */
+  function starPath(ctx, r) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -1.5708 + i * 0.6283, rr = i % 2 ? r * 0.42 : r;
+      const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+  }
+
   function draw(ctx) {
-    // 第一趟：绒絮与碎片，普通混合，它们是实体
+    // 第一趟：绒絮、碎片、星星，普通混合，它们是实体
     ctx.save();
+    ctx.lineJoin = 'round';
     for (let i = 0; i < act.length; i++) {
       const p = act[i];
-      if (p.kind !== 'soft' && p.kind !== 'chip') continue;
+      if (p.kind !== 'soft' && p.kind !== 'chip' && p.kind !== 'star') continue;
       const k = p.life / p.maxLife;
-      const alpha = p.a * (k > 0.85 ? (1 - k) / 0.15 : k / 0.85);   // 快入慢出
+      const alpha = p.a * fade(p);
       if (alpha <= 0.01) continue;
       ctx.globalAlpha = alpha;
       if (p.kind === 'soft') {
         const r = p.r + (p.r1 - p.r) * (1 - k);
         ctx.drawImage(soft(p.rgb), p.x - r, p.y - r, r * 2, r * 2);
+      } else if (p.kind === 'star') {
+        const r = p.r + (p.r1 - p.r) * (1 - k);
+        const ph = p.seed + (1 - k) * 7.4;
+        ctx.save();
+        ctx.translate(p.x + (p.spin ? Math.cos(ph) * p.spin : 0),
+                      p.y + (p.spin ? Math.sin(ph) * p.spin * 0.42 : 0));
+        ctx.rotate(p.rot);
+        starPath(ctx, r);
+        ctx.fillStyle = `rgb(${p.rgb[0]},${p.rgb[1]},${p.rgb[2]})`;
+        ctx.fill();
+        if (p.edge) { ctx.lineWidth = p.lw; ctx.strokeStyle = `rgb(${p.edge[0]},${p.edge[1]},${p.edge[2]})`; ctx.stroke(); }
+        ctx.restore();
       } else {
         ctx.save();
         ctx.translate(p.x, p.y);
         ctx.rotate(p.rot);
-        ctx.fillStyle = `rgb(${p.rgb[0]},${p.rgb[1]},${p.rgb[2]})`;
         // 翻滚时按 cos 压扁，读起来是一片薄东西在空中打转
-        ctx.fillRect(-p.w / 2, -p.h / 2 * Math.abs(Math.cos(p.rot * 1.7)), p.w, p.h);
+        const hh = p.h / 2 * Math.abs(Math.cos(p.rot * 1.7));
+        ctx.fillStyle = `rgb(${p.rgb[0]},${p.rgb[1]},${p.rgb[2]})`;
+        if (p.edge) {
+          // 胶囊形：羽毛和碎屑都不是方砖，描边一上去直角就很扎眼。圆角给到
+          // 半高的满值，短边直接收成半圆 —— 长宽比大的时候读成羽毛，接近
+          // 正方的时候读成碎片，一个形状覆盖两种题材。
+          ctx.beginPath();
+          const rr = Math.min(p.w, hh * 2) * 0.5;
+          ctx.roundRect(-p.w / 2, -hh, p.w, hh * 2, rr);
+          ctx.fill();
+          ctx.lineWidth = p.lw; ctx.strokeStyle = `rgb(${p.edge[0]},${p.edge[1]},${p.edge[2]})`;
+          ctx.stroke();
+        } else {
+          ctx.fillRect(-p.w / 2, -hh, p.w, hh * 2);
+        }
         ctx.restore();
       }
     }
@@ -149,9 +206,9 @@ const Particles = (function () {
     ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < act.length; i++) {
       const p = act[i];
-      if (p.kind === 'soft' || p.kind === 'chip') continue;
+      if (p.kind === 'soft' || p.kind === 'chip' || p.kind === 'star') continue;
       const k = p.life / p.maxLife;
-      const alpha = p.a * (k > 0.85 ? (1 - k) / 0.15 : k / 0.85);
+      const alpha = p.a * fade(p);
       if (alpha <= 0.01) continue;
       ctx.globalAlpha = alpha;
       const rgb = p.rgb;

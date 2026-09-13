@@ -31,7 +31,7 @@ const P = {
   tintDecay: 0.82,   // 染色的衰减
 };
 
-const S = { p: 50, t: 0, auto: true };
+const S = { p: 50, t: 0, auto: true, line: 3 };   // line: 0 全无 / 1 原发光柱 / 2 地面战线+指针 / 3 只要指针
 const FX = {
   phoneX: MID, phoneY: P.phoneY,
   rowOff: new Array(ROWS).fill(0), rowHeat: new Array(ROWS).fill(0),
@@ -134,20 +134,29 @@ function impact(side, y, power, recipe) {
   r.burst(x, y, side, s);
 }
 
-/* 配方表：一件礼物炸出什么，只在这里定义。形态（dot/spark/ring/chip/soft）
+/* 配方表：一件礼物炸出什么，只在这里定义。形态（dot/spark/ring/chip/star/soft）
    是通用的，换题材皮不用动 fx.js。
+
+   颜色有一条硬规矩，是这张底图逼出来的：客厅是浅绿墙 + 米色地板，**白色在
+   这上面几乎加不亮**。所以发光的那几种一律用高饱和暖橙 —— 它靠色相跳出来
+   而不是靠亮度；实体那几种一律深色 + 描边 —— 它靠轮廓跳出来。上一版整套
+   用的奶白和浅米，在胶片上基本看不见。
+
    thud 是通用撞击，任何还没单独配方的东西都落到它上面。 */
+const INK = [58, 44, 38];        // 描边色，取角色线稿那个暖黑
+const EMBER = [255, 156, 38];    // 发光基色，高饱和暖橙
+
 const RECIPE = {
   thud: {
-    tint: [255, 246, 232],
+    tint: [255, 224, 186],
     burst(x, y, side, s) {
       Particles.spawn({ kind: 'dot', x, y, r: 16 * s, r1: 70 * s, life: 0.20,
-                        rgb: [255, 255, 255], a: 0.85 });
+                        rgb: [255, 196, 110], a: 0.9 });
       Particles.spawn({ kind: 'ring', x, y, r: 10 * s, r1: 120 * s, life: 0.38,
-                        rgb: [255, 236, 200], lw: 6 * s });
+                        rgb: EMBER, lw: 6 * s });
       // 第二道环晚 70ms 出场，读起来是"砰—砰"两下而不是一下
       setTimeout(() => Particles.spawn({ kind: 'ring', x, y, r: 8 * s, r1: 180 * s,
-                        life: 0.44, rgb: [255, 226, 180], lw: 4 * s }), 70);
+                        life: 0.44, rgb: [255, 132, 54], lw: 4 * s }), 70);
       /* 火花给足数量。画布 960x1334，二三十个粒子铺开就只剩零星几点，
          读不出"炸开"—— 这里的密度感是靠数量堆的，不是靠单颗更亮。 */
       for (let i = 0; i < Math.round(26 * s); i++) {
@@ -155,14 +164,14 @@ const RECIPE = {
         const sp = (240 + Math.random() * 560) * s;
         Particles.spawn({ kind: 'spark', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 110,
                           g: 980, drag: 0.985, life: 0.24 + Math.random() * 0.3,
-                          rgb: i % 4 ? [255, 238, 196] : [255, 255, 255],
-                          lw: 1.4 + Math.random() * 2.2 * s });
+                          rgb: i % 4 ? EMBER : [255, 238, 150],
+                          lw: 1.6 + Math.random() * 2.4 * s });
       }
       for (let i = 0; i < Math.round(14 * s); i++) {
         Particles.spawn({ kind: 'soft', x: x + (Math.random() - 0.5) * 60 * s, y: y + (Math.random() - 0.3) * 40,
                           vx: -side * (40 + Math.random() * 150) * s, vy: -20 - Math.random() * 80,
                           g: 90, drag: 0.94, r: 10 * s, r1: (46 + Math.random() * 34) * s,
-                          life: 0.7 + Math.random() * 0.7, rgb: [216, 208, 196], a: 0.34 });
+                          life: 0.7 + Math.random() * 0.7, rgb: [150, 128, 110], a: 0.30 });
       }
       // 翻滚的小片：撞击总要崩下点什么，没有它只有光，像是凭空亮了一下
       for (let i = 0; i < Math.round(9 * s); i++) {
@@ -170,9 +179,126 @@ const RECIPE = {
         const sp = (170 + Math.random() * 330) * s;
         Particles.spawn({ kind: 'chip', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 200,
                           g: 780, drag: 0.99, life: 0.7 + Math.random() * 0.6,
-                          w: 5 + Math.random() * 7 * s, h: 3 + Math.random() * 5 * s,
+                          w: 6 + Math.random() * 8 * s, h: 4 + Math.random() * 6 * s,
                           rot: Math.random() * 6.28, vrot: (Math.random() - 0.5) * 16,
-                          rgb: [236, 226, 210], a: 0.9 });
+                          rgb: [122, 96, 78], edge: INK, lw: 1.6, a: 0.95 });
+      }
+    },
+  },
+
+  /* 枕头砸脸。全场唯一一个不出火花的配方 —— 枕头砸下去的是一团闷响和漫天
+     绒毛，给它配火花就成了爆炸。冲击感全靠数量和滞空：羽毛重力只有常规的
+     八分之一、阻力极大，所以命中半秒之后画面里还在飘，而火花那时候早没了。 */
+  feather: {
+    tint: [255, 238, 240],
+    burst(x, y, side, s) {
+      Particles.spawn({ kind: 'dot', x, y, r: 22 * s, r1: 72 * s, life: 0.20,
+                        rgb: [255, 206, 198], a: 0.40 });
+      // 绒絮：贴着撞击点炸开的那一蓬，用来糊住撞击瞬间。别给多 —— 它是浅色
+      // 的，在浅色沙发前面堆厚了就是一团白雾，把羽毛的形状全吃掉。
+      for (let i = 0; i < Math.round(11 * s); i++) {
+        const a = Math.random() * 6.283;
+        Particles.spawn({ kind: 'soft', x, y, vx: Math.cos(a) * (70 + Math.random() * 240) * s,
+                          vy: Math.sin(a) * (60 + Math.random() * 180) * s - 90,
+                          g: 60, drag: 0.92, r: 14 * s, r1: (48 + Math.random() * 38) * s,
+                          life: 0.5 + Math.random() * 0.6, rgb: [214, 200, 206], a: 0.26 });
+      }
+      /* 羽毛本体：sway 左右摆，慢慢打着旋往下落。
+         尺寸和数量是按"直播画面上看得见"定的，不是按真羽毛定的 —— 一根真
+         羽毛在 960 宽的画布上只有十几像素，观众端再缩一半就是几个像素的白
+         点，等于没有。阻力也不能给真实值：0.958 每帧意味着三分之一秒后羽毛
+         就地停住，全堆在命中点上，看着像一摊泡沫而不是炸开的枕头。 */
+      for (let i = 0; i < Math.round(30 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.8;
+        const sp = (200 + Math.random() * 560) * s;
+        Particles.spawn({ kind: 'chip', x: x + (Math.random() - 0.5) * 60, y: y + (Math.random() - 0.5) * 80,
+                          vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 170,
+                          g: 150, drag: 0.988, sway: 40 + Math.random() * 55,
+                          life: 1.5 + Math.random() * 1.4,
+                          w: 20 + Math.random() * 17 * s, h: 12 + Math.random() * 9,
+                          rot: Math.random() * 6.28, vrot: (Math.random() - 0.5) * 5.0,
+                          rgb: i % 5 ? [252, 250, 250] : [250, 232, 236], edge: [138, 118, 122],
+                          lw: 1.9, a: 1 });
+      }
+    },
+  },
+
+  /* 打懵了：头顶转圈的星星。这是全套里最"卡通"的一个，也是最省事的一个 ——
+     星星本身就是观众对"挨了一下"的默认图示，不需要任何解释。
+     spin 让它绕着命中点公转，不是原地飞散：飞散读成爆炸，公转才读成眩晕。 */
+  star: {
+    tint: [255, 242, 196],
+    burst(x, y, side, s) {
+      Particles.spawn({ kind: 'dot', x, y, r: 14 * s, r1: 74 * s, life: 0.18,
+                        rgb: [255, 214, 96], a: 0.85 });
+      Particles.spawn({ kind: 'ring', x, y, r: 8 * s, r1: 108 * s, life: 0.32,
+                        rgb: [255, 196, 72], lw: 5 * s });
+      // 公转的大星星：数量少，每颗都要看得清，所以描边给足
+      for (let i = 0; i < Math.round(7 * s); i++) {
+        const a = Math.random() * 6.283;
+        Particles.spawn({ kind: 'star', x: x - side * 20, y: y - 40 - Math.random() * 60,
+                          vx: -side * (20 + Math.random() * 90), vy: -60 - Math.random() * 90,
+                          g: 180, drag: 0.95, spin: 26 + Math.random() * 34,
+                          r: (13 + Math.random() * 11) * s, r1: 3,
+                          life: 0.7 + Math.random() * 0.6,
+                          rot: a, vrot: (Math.random() - 0.5) * 7,
+                          rgb: [255, 208, 56], edge: [126, 74, 18], lw: 2.4, a: 1 });
+      }
+      // 小星星飞散，补密度
+      for (let i = 0; i < Math.round(11 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.8;
+        const sp = (200 + Math.random() * 440) * s;
+        Particles.spawn({ kind: 'star', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 180,
+                          g: 640, drag: 0.982, r: (6 + Math.random() * 6) * s, r1: 2,
+                          life: 0.5 + Math.random() * 0.45,
+                          rot: a, vrot: (Math.random() - 0.5) * 14,
+                          rgb: [255, 226, 120], edge: [150, 96, 24], lw: 1.6, a: 1 });
+      }
+      for (let i = 0; i < Math.round(14 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.4;
+        const sp = (260 + Math.random() * 480) * s;
+        Particles.spawn({ kind: 'spark', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 120,
+                          g: 900, drag: 0.985, life: 0.2 + Math.random() * 0.22,
+                          rgb: [255, 198, 70], lw: 1.4 + Math.random() * 2 * s });
+      }
+    },
+  },
+
+  /* 硬东西砸碎（遥控器、马克杯）。碎片一律深色 —— 这是三个配方里唯一能在
+     米色地板上自带对比的，所以它不描边也认得出，描边只是为了和另外两个
+     配方看起来是同一套东西。 */
+  debris: {
+    tint: [226, 238, 255],
+    burst(x, y, side, s) {
+      Particles.spawn({ kind: 'dot', x, y, r: 18 * s, r1: 82 * s, life: 0.16,
+                        rgb: [255, 236, 190], a: 0.95 });
+      Particles.spawn({ kind: 'ring', x, y, r: 12 * s, r1: 150 * s, life: 0.30,
+                        rgb: [255, 176, 60], lw: 7 * s });
+      // 碎片：重、快、弹不起来，落地就停 —— 和羽毛正好是两个极端
+      for (let i = 0; i < Math.round(24 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.5;
+        const sp = (300 + Math.random() * 620) * s;
+        const dark = i % 3 === 0;
+        Particles.spawn({ kind: 'chip', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 300,
+                          g: 1450, drag: 0.995, life: 0.55 + Math.random() * 0.5,
+                          w: 5 + Math.random() * 12 * s, h: 4 + Math.random() * 8 * s,
+                          rot: Math.random() * 6.28, vrot: (Math.random() - 0.5) * 22,
+                          rgb: dark ? [48, 54, 64] : [96, 106, 120], edge: INK, lw: 1.5, a: 1 });
+      }
+      for (let i = 0; i < Math.round(30 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.0;
+        const sp = (320 + Math.random() * 700) * s;
+        Particles.spawn({ kind: 'spark', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 140,
+                          g: 1020, drag: 0.984, life: 0.18 + Math.random() * 0.26,
+                          rgb: i % 3 ? EMBER : [255, 244, 176],
+                          lw: 1.4 + Math.random() * 2.6 * s });
+      }
+      // 一小撮灰，落在碎片后面，撞击点不至于干干净净
+      for (let i = 0; i < Math.round(9 * s); i++) {
+        Particles.spawn({ kind: 'soft', x: x + (Math.random() - 0.5) * 70 * s, y: y + (Math.random() - 0.2) * 50,
+                          vx: -side * (50 + Math.random() * 170) * s, vy: -30 - Math.random() * 70,
+                          g: 70, drag: 0.93, r: 12 * s, r1: (50 + Math.random() * 40) * s,
+                          life: 0.6 + Math.random() * 0.6, rgb: [138, 132, 128], a: 0.34 });
       }
     },
   },
@@ -289,6 +415,65 @@ function drawLine(ctx, k = 1) {
   ctx.restore(); ctx.globalAlpha = 1;
 }
 
+/* 对抗线的替代画法（?line=2）。
+   原来那根贯穿全屏的发光柱（?line=1）在这张底图上表现力差，根因和白闪过曝
+   是同一个：它走 lighter，而底图是明亮客厅 —— 浅绿墙本来就接近饱和，往上
+   加光几乎不改变什么，只剩一团雾；龙王那边同样的写法很炸，是因为它的底图
+   是暗色战场。更要命的是它正好横在两个人中间，把抢手机的手和脸挡掉了，而
+   那是这个玩法唯一值得看的东西。
+
+   所以战线改成在地上走：深色带 + 势力色描边，靠轮廓而不是靠发光，明亮底图
+   上反而更显眼；又完全不挡人。读数一点没少 —— 战线横坐标仍然是 frontAt，
+   和手机、刻度尺、地面辉光同一个源。 */
+function drawFrontGround(ctx, bias) {
+  const R = P.rug, col = Math.abs(bias) < 0.06 ? [250, 250, 250] : (bias > 0 ? GREEN : RED);
+  const N = 14;
+  const xs = [], ys = [], ws = [];
+  for (let i = 0; i <= N; i++) {
+    const d = i / N, y = R.top + (R.bot - R.top) * d;
+    ys.push(y); xs.push(frontAt(y) + FX.jit);
+    ws.push(8 + d * 20);          // 下宽上窄，跟着地毯的透视走
+  }
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(R.tl, R.top); ctx.lineTo(R.tr, R.top);
+  ctx.lineTo(R.br, R.bot); ctx.lineTo(R.bl, R.bot); ctx.closePath();
+  ctx.clip();
+  ctx.beginPath();
+  for (let i = 0; i <= N; i++) (i ? ctx.lineTo : ctx.moveTo).call(ctx, xs[i] - ws[i], ys[i]);
+  for (let i = N; i >= 0; i--) ctx.lineTo(xs[i] + ws[i], ys[i]);
+  ctx.closePath();
+  /* 双描边：外圈暗、内圈势力色。单描边在地毯的绿和地板的米色上各有一段
+     会掉对比，而这条带子从地毯一直压到地板边缘，横跨两种底色。 */
+  ctx.fillStyle = 'rgba(22,18,26,.70)';
+  ctx.fill();
+  ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(12,10,16,.55)'; ctx.stroke();
+  ctx.lineWidth = 3.5; ctx.strokeStyle = rgba(col, .98); ctx.stroke();
+  ctx.restore();
+}
+
+/* 战线在画面顶端的读数：一个不会被任何东西挡住的指针。
+   它能脱离地面带单独存在（?line=3，默认），而且这正是推荐的用法 —— 地上
+   那条带子横在两个人的腿中间，激烈的时候被挡掉大半，剩下的半截读起来像
+   一根立在地上的杆子；指针在画面顶端，既不挡人也永远看得见。
+   完全不画（?line=0）也能看出谁占优（地面辉光、血条、刻度尺都在），但读不
+   出战线此刻**具体**压在哪一条竖线上，而手机位移就是这个玩法的进度条。 */
+function drawFrontMark(ctx, bias) {
+  const col = Math.abs(bias) < 0.06 ? [255, 255, 255] : (bias > 0 ? GREEN : RED);
+  const x = frontAt(TOP) + FX.jit, y = TOP - 2;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(12,14,20,.6)'; ctx.lineWidth = 11;
+  ctx.beginPath(); ctx.moveTo(x, y + 6); ctx.lineTo(x, y + 52); ctx.stroke();
+  ctx.strokeStyle = rgba(col, .98); ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(x, y + 6); ctx.lineTo(x, y + 52); ctx.stroke();
+  ctx.fillStyle = rgba(col, 1);
+  ctx.beginPath();
+  ctx.moveTo(x, y + 16); ctx.lineTo(x - 21, y - 16); ctx.lineTo(x + 21, y - 16);
+  ctx.closePath(); ctx.fill();
+  ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(12,14,20,.7)'; ctx.stroke();
+  ctx.restore();
+}
+
 /* 地面辉光：手机被拽向谁，谁脚下的地就烧起来，浓度 = 领先幅度。
    不用"线两侧分色"——拔河里绳结被拽过去不等于对面丢了地盘，
    那个画法在极端档会把颜色铺反。 */
@@ -382,6 +567,7 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
   const Q = new URLSearchParams(location.search);
   if (Q.has('p')) { S.p = clamp(+Q.get('p'), 0, 100); S.auto = false; }
   if (Q.get('auto') === '0') S.auto = false;
+  if (Q.has('line')) S.line = clamp(+Q.get('line') | 0, 0, 3);
   // ?zoom=1 用画布原生尺寸铺开，截图时才看得清脸和手的实际画法
   if (Q.get('zoom') === '1') document.getElementById('stage').style.width = W + 'px';
   document.getElementById('pv').value = S.p;
@@ -400,7 +586,8 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     bctx.drawImage(bg, 0, 0, W, H);
     drawGround(bctx, bias);
     bctx.save(); bctx.translate(ox, oy);
-    drawLine(bctx);
+    if (S.line === 1) drawLine(bctx);
+    else if (S.line === 2) drawFrontGround(bctx, bias);
     bctx.restore();
 
     cctx.clearRect(0, 0, W, H);
@@ -410,7 +597,10 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
 
     fctx.clearRect(0, 0, W, H);
     fctx.save(); fctx.translate(ox, oy);
-    drawLine(fctx, 0.42);
+    /* line=1 要在角色之上再叠一遍，否则光柱全程被两具身体挡死；line=2 的
+       带子在地上，挡住了也没关系 —— 顶端那个指针替它做读数。 */
+    if (S.line === 1) drawLine(fctx, 0.42);
+    else if (S.line >= 2) drawFrontMark(fctx, bias);
     drawRuler(fctx);
     Particles.draw(fctx);
     fctx.restore();
@@ -446,6 +636,35 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     return;
   }
 
+  /* ?linestrip=1 把对抗线的三种画法并排摆着比。三档各截一张再拼是不行的
+     —— 每张 headless 截图要等一百秒，而且三张之间 S.t 不同，线的抖动相位
+     对不上，看到的差别有一半是相位差不是画法差。 */
+  if (Q.has('linestrip')) {
+    const sc = 0.5, names = ['line=0 全去掉', 'line=1 原发光柱', 'line=2 地面战线+指针', 'line=3 只要指针'];
+    S.auto = false; S.t = 3.0;
+    for (let k = 0; k < 150; k++) derive(1 / 60);
+    const out = document.createElement('canvas');
+    out.width = names.length * W * sc; out.height = H * sc;
+    const o = out.getContext('2d');
+    o.fillStyle = '#0c0e12'; o.fillRect(0, 0, out.width, out.height);
+    for (let i = 0; i < names.length; i++) {
+      S.line = i;
+      render();
+      const dx = i * W * sc;
+      for (const c of [cvBg, cvCh, cvFx]) o.drawImage(c, dx, 0, W * sc, H * sc);
+      o.fillStyle = 'rgba(0,0,0,.72)'; o.fillRect(dx, 0, 160, 26);
+      o.fillStyle = '#ffd36b'; o.font = '600 15px system-ui';
+      o.fillText(`${names[i]}  p=${S.p.toFixed(0)}`, dx + 8, 18);
+    }
+    const stage = document.getElementById('stage');
+    stage.style.width = out.width + 'px';
+    stage.style.aspectRatio = `${out.width}/${out.height}`;
+    stage.innerHTML = '';
+    out.style.cssText = 'position:absolute;inset:0;width:100%;height:100%';
+    stage.appendChild(out);
+    return;
+  }
+
   /* ?fxstrip=N 出一条特效胶片：打一下，然后每 MS 毫秒抓一格。
      特效是瞬时的，单张截图什么也验证不了 —— 只有把同一次命中的前后若干
      毫秒并排摆着，才看得出顿帧有没有生效、冲击波是不是沿线传出去了、
@@ -454,6 +673,7 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     const n = clamp(+Q.get('fxstrip') | 0, 2, 12);
     const MS = clamp(+(Q.get('fxms') || 60), 16, 400) / 1000;
     const sc = 0.5, power = clamp(+(Q.get('fxpower') || 3), 1, 3);
+    const rcp = RECIPE[Q.get('fxrecipe')] || RECIPE.thud;
     S.auto = false; S.t = 3.0;
     for (let k = 0; k < 150; k++) derive(1 / 60);
 
@@ -462,19 +682,29 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     const o = out.getContext('2d');
     o.fillStyle = '#0c0e12'; o.fillRect(0, 0, out.width, out.height);
 
-    impact(-1, FX.phoneY, power);
+    impact(-1, FX.phoneY, power, rcp);
+    let el = 0;
     for (let i = 0; i < n; i++) {
-      if (i > 0) for (let k = 0; k < Math.round(MS * 60); k++) {
+      /* 第一格只推进一帧。命中那一瞬间粒子都还没展开，拿一整格去拍它等于
+         白扔八分之一的胶片宽度。 */
+      const step = i === 0 ? 1 / 60 : MS;
+      for (let k = 0; k < Math.max(1, Math.round(step * 60)); k++) {
         const d = Particles.tick(1 / 60);   // 与主循环同构：粒子走真实时间，逻辑走 d
         Particles.update(1 / 60);
         derive(d);
       }
+      el += step;
       render();
       const dx = i * W * sc;
       for (const c of [cvBg, cvCh, cvFx]) o.drawImage(c, dx, 0, W * sc, H * sc);
       o.fillStyle = 'rgba(0,0,0,.66)'; o.fillRect(dx, 0, 132, 26);
       o.fillStyle = '#fff'; o.font = '600 15px system-ui';
-      o.fillText(`+${Math.round(i * MS * 1000)}ms 粒子${Particles.count()}`, dx + 8, 18);
+      o.fillText(`+${Math.round(el * 1000)}ms 粒子${Particles.count()}`, dx + 8, 18);
+      if (i === 0) {
+        o.fillStyle = 'rgba(0,0,0,.66)'; o.fillRect(dx, 26, 132, 24);
+        o.fillStyle = '#ffd36b';
+        o.fillText(`${Q.get('fxrecipe') || 'thud'} p${power} line${S.line}`, dx + 8, 42);
+      }
     }
     const stage = document.getElementById('stage');
     stage.style.width = out.width + 'px';
@@ -519,12 +749,18 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
                        S.p = clamp(S.p + d, 0, 100); pv.value = S.p; };
   /* 按钮既推进度也打一下：进度是玩法，命中是演出，观众看到的是同一件事。
      side 取推力的反方向 —— 查岗党加分等于灭迹党挨了一下。 */
-  const hit = (d, power) => {
+  const power = () => +document.getElementById('pw').value;
+  const hit = (d, rcp) => {
     nudge(d);
-    impact(d > 0 ? -1 : +1, FX.phoneY, power);
+    impact(d > 0 ? -1 : +1, FX.phoneY, power(), rcp);
   };
-  document.getElementById('hitL').onclick = () => hit(+7, 2);
-  document.getElementById('hitR').onclick = () => hit(-7, 2);
-  document.getElementById('hitBig').onclick = () => hit(+18, 3);
-  document.getElementById('hitSmall').onclick = () => hit(+2, 1);
+  document.getElementById('hitL').onclick = () => hit(+7, RECIPE.thud);
+  document.getElementById('hitR').onclick = () => hit(-7, RECIPE.thud);
+  // 三个配方都由查岗党打出去，落在灭迹党身上；力度由上面那个下拉决定
+  document.getElementById('fxFeather').onclick = () => hit(+7, RECIPE.feather);
+  document.getElementById('fxStar').onclick = () => hit(+7, RECIPE.star);
+  document.getElementById('fxDebris').onclick = () => hit(+7, RECIPE.debris);
+  const lv = document.getElementById('lv');
+  lv.value = S.line;
+  lv.onchange = () => S.line = +lv.value;
 })();
