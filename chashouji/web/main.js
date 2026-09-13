@@ -304,6 +304,29 @@ const RECIPE = {
   },
 };
 
+/* 礼物表：一件礼物 = 谁发的 + 哪种样式 + 什么物品 + 命中落哪个配方 + 推多少进度。
+   加新礼物只加一行，ammo.js 和 fx.js 都不用动 —— 样式管节奏、配方管爆开的
+   形态，两边都是通用的。
+
+   三种样式的差别是节奏与体量，不是物品：
+     volley 连珠  一串小件快速飞来，每颗单独命中，对应免费/点赞级
+     single 单投  单件中等速度，看得清是什么东西，对应普通礼物
+     heavy  重投  先预警再慢慢压过来，对应大礼物
+   观众不需要认出飞过来的是什么，光看节奏就知道这一发有多重。
+
+   gain 是命中时推的进度。连珠每颗只推一点点，八颗合计还不到一次单投 ——
+   刷得越久推得越多，但单发永远比不过真金白银的礼物。 */
+const GIFT = {
+  // 查岗党（女方，在左，from=+1）
+  hairpin: { from: +1, style: 'volley', item: 'hairpin', r: 22, n: 8, power: 1, recipe: 'star',    gain: 0.8 },
+  pillow:  { from: +1, style: 'single', item: 'pillow',  r: 56,       power: 2, recipe: 'feather', gain: 7 },
+  quilt:   { from: +1, style: 'heavy',  item: 'quilt',   r: 78,       power: 3, recipe: 'feather', gain: 18 },
+  // 灭迹党（男方，在右，from=-1）
+  seed:    { from: -1, style: 'volley', item: 'seed',    r: 21, n: 8, power: 1, recipe: 'star',    gain: 0.8 },
+  gamepad: { from: -1, style: 'single', item: 'gamepad', r: 52,       power: 2, recipe: 'debris',  gain: 7 },
+  box:     { from: -1, style: 'heavy',  item: 'box',     r: 74,       power: 3, recipe: 'debris',  gain: 18 },
+};
+
 function sampleRow(arr, y) {
   const d = clamp((y - TOP) / (BOT - TOP), 0, 1) * (ROWS - 1);
   const i = clamp(Math.floor(d), 0, ROWS - 2), f = d - i;
@@ -554,6 +577,17 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
   const cvBg = document.getElementById('bg'), cvCh = document.getElementById('ch'), cvFx = document.getElementById('fx');
   const bctx = cvBg.getContext('2d'), cctx = cvCh.getContext('2d'), fctx = cvFx.getContext('2d');
   initTex();
+  /* 弹幕命中的是对抗线在**它自己那个高度**上的横坐标，不是中点。所以从不同
+     高度飞来的弹幕会在不同的行注入冲量 —— 在这之前所有命中都发生在 phoneY
+     一个位置上，那条线永远只在同一处抖。 */
+  Ammo.init({
+    W, frontAt,
+    onHit(p) {
+      S.p = clamp(S.p + p.from * p.g.gain, 0, 100);
+      document.getElementById('pv').value = S.p;
+      impact(-p.from, p.y, p.g.power, RECIPE[p.g.recipe]);
+    },
+  });
 
   const bg = await load('assets/bg.jpg');
   /* 每 1% 一张。缺的档位解码失败是预期内的，取 null 交给 FrameSeq 映射到邻居。 */
@@ -602,6 +636,9 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     if (S.line === 1) drawLine(fctx, 0.42);
     else if (S.line >= 2) drawFrontMark(fctx, bias);
     drawRuler(fctx);
+    /* 弹幕在角色之上、粒子之下：它飞向两个人中间，画在角色底下的话命中前
+       最后那段就被身体挡掉了；而粒子是命中的爆炸，该盖在弹幕上面。 */
+    Ammo.draw(fctx);
     Particles.draw(fctx);
     fctx.restore();
     drawHUD(fctx, S.p);
@@ -626,6 +663,56 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
       o.fillStyle = 'rgba(0,0,0,.66)'; o.fillRect(dx, 0, 86, 26);
       o.fillStyle = '#fff'; o.font = '600 15px system-ui';
       o.fillText(`p=${S.p.toFixed(0)}`, dx + 8, 18);
+    }
+    const stage = document.getElementById('stage');
+    stage.style.width = out.width + 'px';
+    stage.style.aspectRatio = `${out.width}/${out.height}`;
+    stage.innerHTML = '';
+    out.style.cssText = 'position:absolute;inset:0;width:100%;height:100%';
+    stage.appendChild(out);
+    return;
+  }
+
+  /* ?ammostrip=N 看一发弹幕从出场到命中的全过程。飞行节奏是这个功能的全部，
+     而它在静止截图里根本不存在 —— 得把整条轨迹按时间摊开才看得出速度合不
+     合适、预警够不够长、命中点准不准。
+     ?ammogift=<礼物名> 选哪一件，?ammoy=<高度> 固定发射高度（随机高度会让
+     每次截出来的图不一样，没法对比）。 */
+  if (Q.has('ammostrip')) {
+    const n = clamp(+Q.get('ammostrip') | 0, 2, 12);
+    const MS = clamp(+(Q.get('ammoms') || 110), 16, 400) / 1000;
+    const sc = 0.5, gname = Q.get('ammogift') || 'pillow';
+    const g = GIFT[gname] || GIFT.pillow;
+    S.auto = false; S.t = 3.0;
+    for (let k = 0; k < 150; k++) derive(1 / 60);
+
+    const out = document.createElement('canvas');
+    out.width = n * W * sc; out.height = H * sc;
+    const o = out.getContext('2d');
+    o.fillStyle = '#0c0e12'; o.fillRect(0, 0, out.width, out.height);
+
+    Ammo.launch(g, clamp(+(Q.get('ammoy') || 560), 300, 960));
+    let el = 0;
+    for (let i = 0; i < n; i++) {
+      const step = i === 0 ? 1 / 60 : MS;
+      for (let k = 0; k < Math.max(1, Math.round(step * 60)); k++) {
+        const d = Particles.tick(1 / 60);
+        Particles.update(1 / 60);
+        Ammo.update(d);
+        derive(d);
+      }
+      el += step;
+      render();
+      const dx = i * W * sc;
+      for (const c of [cvBg, cvCh, cvFx]) o.drawImage(c, dx, 0, W * sc, H * sc);
+      o.fillStyle = 'rgba(0,0,0,.66)'; o.fillRect(dx, 0, 168, 26);
+      o.fillStyle = '#fff'; o.font = '600 15px system-ui';
+      o.fillText(`+${Math.round(el * 1000)}ms 弹${Ammo.count()} 粒${Particles.count()}`, dx + 8, 18);
+      if (i === 0) {
+        o.fillStyle = 'rgba(0,0,0,.66)'; o.fillRect(dx, 26, 168, 24);
+        o.fillStyle = '#ffd36b';
+        o.fillText(`${gname} · ${g.style} · p=${S.p.toFixed(0)}`, dx + 8, 42);
+      }
     }
     const stage = document.getElementById('stage');
     stage.style.width = out.width + 'px';
@@ -726,6 +813,10 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
        读起来是"闪了一下、卡住、然后才炸开"。 */
     const dt = Particles.tick(raw);
     Particles.update(raw);
+    /* 弹幕走 dt，跟游戏逻辑一起冻。这和粒子走真实时间并不矛盾：爆炸是"刚刚
+       这一下"的可视化，冻住它就迟到了；而正在飞的弹幕是**下一下**的前奏，
+       顿帧的意思就是全世界停下来看这一击，此刻别的东西还在飞就散掉了。 */
+    Ammo.update(dt);
     S.t += dt;
 
     if (S.auto) {
@@ -757,9 +848,14 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
   document.getElementById('hitL').onclick = () => hit(+7, RECIPE.thud);
   document.getElementById('hitR').onclick = () => hit(-7, RECIPE.thud);
   // 三个配方都由查岗党打出去，落在灭迹党身上；力度由上面那个下拉决定
-  document.getElementById('fxFeather').onclick = () => hit(+7, RECIPE.feather);
-  document.getElementById('fxStar').onclick = () => hit(+7, RECIPE.star);
-  document.getElementById('fxDebris').onclick = () => hit(+7, RECIPE.debris);
+  /* 礼物按钮只负责发射，进度和特效都等弹幕真的撞上对抗线才结算 —— 玩法和
+     演出走的是同一个事件，观众看到的因果关系才对得上。 */
+  for (const b of document.querySelectorAll('[data-gift]')) {
+    b.onclick = () => {
+      S.auto = false; document.getElementById('auto').checked = false;
+      Ammo.launch(GIFT[b.dataset.gift]);
+    };
+  }
   const lv = document.getElementById('lv');
   lv.value = S.line;
   lv.onchange = () => S.line = +lv.value;
