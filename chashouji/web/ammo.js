@@ -103,6 +103,64 @@ const Ammo = (function () {
     },
   };
 
+  /* 外轮廓剪影 —— 残影专用。
+     残影是速度残像，照着本体一笔一笔画满缝线、按键、格纹，既贵（四个残影
+     就是四遍完整物品）又脏（细节在高速移动里糊成噪点）。它只需要形状。
+     调用方负责 fill，这里只铺路径。 */
+  const SILH = {
+    hairpin(ctx, r) {
+      ctx.beginPath();
+      ctx.roundRect(-r, -r * 0.3, r * 2, r * 0.6, r * 0.3);
+      ctx.moveTo(-r * 0.16, 0);
+      ctx.arc(-r * 0.62, 0, r * 0.46, 0, 6.2832);
+    },
+    seed(ctx, r) {
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.quadraticCurveTo(0, r * 0.66, -r, 0);
+      ctx.quadraticCurveTo(0, -r * 0.66, r, 0);
+    },
+    pillow(ctx, r) { ctx.beginPath(); ctx.roundRect(-r, -r * 0.84, r * 2, r * 1.68, r * 0.4); },
+    gamepad(ctx, r) { ctx.beginPath(); ctx.roundRect(-r, -r * 0.48, r * 2, r * 0.96, r * 0.44); },
+    quilt(ctx, r) { ctx.beginPath(); ctx.roundRect(-r, -r * 0.7, r * 2, r * 1.4, r * 0.18); },
+    box(ctx, r) { ctx.beginPath(); ctx.roundRect(-r, -r * 0.72, r * 2, r * 1.44, r * 0.1); },
+  };
+
+  /* 自发光的颜色。
+     这里的"发光"不是加光。明亮客厅底图上 lighter 是加不上去的 —— 浅绿墙
+     本来就接近饱和，任何颜色加上去都只是趋向白，红色叠浅绿直接变成纯白。
+     所以走的是**色晕**：普通混合的半透明高饱和色，比本体大一圈、边缘柔化。
+     它靠色相从背景里跳出来，跟粒子那套"发光的一律高饱和暖橙"是同一条规矩。
+
+     取每件物品主色的高饱和版，顺带把阵营也读出来：查岗党偏粉紫，灭迹党偏
+     琥珀与青。观众看一眼弹道的颜色就知道这一发是谁打的。 */
+  const AURA = {
+    hairpin: [255, 64, 156], pillow: [255, 92, 164], quilt: [255, 76, 148],
+    seed: [255, 148, 48], gamepad: [64, 206, 255], box: [255, 136, 40],
+  };
+
+  /* 色晕贴图一次性烘好。这台机器没有 GPU，每帧 createRadialGradient 是最贵的
+     几件事之一 —— 跟 fx.js 里光斑的处理是同一个理由。六件物品六张，建完就
+     不再动。 */
+  const auraCache = new Map();
+  function aura(rgb) {
+    const key = rgb[0] + ',' + rgb[1] + ',' + rgb[2];
+    let c = auraCache.get(key);
+    if (c) return c;
+    const S = 128;
+    c = document.createElement('canvas');
+    c.width = c.height = S;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    rg.addColorStop(0.00, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.92)`);
+    rg.addColorStop(0.34, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.56)`);
+    rg.addColorStop(0.68, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.18)`);
+    rg.addColorStop(1.00, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+    g.fillStyle = rg; g.fillRect(0, 0, S, S);
+    auraCache.set(key, c);
+    return c;
+  }
+
   /* 拖尾带的颜色：每件物品自己主色的暗调，不是统一的黑。统一用深色的话，
      拖在浅粉抱枕后面读起来像一团影子或者污渍 —— 那是"另一个东西"，而拖尾
      应该是它自己甩出来的。 */
@@ -149,9 +207,37 @@ const Ammo = (function () {
   }
 
   const clampY = (y) => y < 300 ? 300 : y > 960 ? 960 : y;
+  const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
+
+  /* 轨迹环形缓冲的长度。原来是 8 帧，看着够，实际不够：被子 850px/s，八帧
+     只往回退了 113 像素，而被子本身就有 156 像素宽 —— 拖尾比物体还短，整条
+     全叠在本体底下，画了等于没画。 */
+  const TRAIL = 16, TMASK = 15;
+
+  /* 一发弹幕"拖多长"。
+     取尺寸和速度里更大的那个：大件按自己的身长拖（否则拖尾埋在本体底下），
+     快件按速度拖（一颗小发卡飞得再快，只按身长拖也读不出快）。两条各自都
+     会在另一头失效，所以是 max 而不是二选一。 */
+  const reachOf = (p) => Math.max(p.r * 2.6, Math.abs(p.vx) * 0.09);
+
+  /* 沿轨迹往回找距离本体 dist 像素的那一点。
+     残影和拖尾都按**距离**回溯，不按帧数 —— 按帧数的话同样是四个残影，
+     发卡（1400px/s、半宽 22）能拖出四个身长，被子（850px/s、半宽 78）四帧
+     只退 57 像素，全糊在本体上。眼睛读的是拖了多长，那是距离不是时间。 */
+  function backAt(p, dist) {
+    for (let k = 1; k < TRAIL; k++) {
+      const idx = (p.hi + TRAIL - k) & TMASK;
+      if (Math.abs(p.x - p.hx[idx]) >= dist) return idx;
+    }
+    return (p.hi + 1) & TMASK;
+  }
 
   function fire(q) {
-    if (act.length >= MAX) return;
+    /* 池满了就回收最老的那一发，而不是把新的丢掉。原来是直接 return ——
+       观众刷了礼物，屏幕上却什么也没飞出来，这是连点时最糟糕的一种反馈。
+       act 按发射顺序排，队头那一发飞得最久、离对抗线最近，让它提前退场的
+       代价远小于让刚刷的这一件凭空消失。 */
+    if (act.length >= MAX) pool.push(act.shift());
     const g = q.g, sp = SPEED[g.style] || 900;
     const p = pool.pop() || {};
     p.g = g; p.item = g.item; p.r = g.r; p.y = q.y;
@@ -165,9 +251,11 @@ const Ammo = (function () {
     /* 轨迹环形缓冲：拖尾画的是这个东西**真正走过**的地方。原先那几条速度线
        是固定画在本体后方的，跟实际路径无关，所以飞得快飞得慢看上去一个样；
        记下真实轨迹之后，拖尾长度自己就跟速度挂上钩了。 */
-    p.hx = p.hx || new Float64Array(8);
-    p.hr = p.hr || new Float64Array(8);
+    p.hx = p.hx || new Float64Array(TRAIL);
+    p.hr = p.hr || new Float64Array(TRAIL);
     p.hx.fill(p.x); p.hr.fill(p.rot); p.hi = 0;
+    p.x0 = p.x;                // 起点，用来算"飞到哪儿了"
+    p.near = 0;                // 0 刚出场 → 1 贴上对抗线，色晕靠它烧起来
     act.push(p);
   }
 
@@ -192,10 +280,14 @@ const Ammo = (function () {
          吃掉，稳态就在 1px 上下 —— 不是震动，是压迫感。 */
       if (p.g.style === 'heavy') Particles.addShake(0.15);
 
-      p.hi = (p.hi + 1) & 7;
+      p.hi = (p.hi + 1) & TMASK;
       p.hx[p.hi] = p.x; p.hr[p.hi] = p.rot;
 
       const fx = frontAt(p.y);
+      /* 走完了全程的多少。色晕靠它在命中前一路烧起来 —— 观众在撞上之前就
+         知道这一发要到了，而这正是弹幕能制造期待的唯一窗口。 */
+      const span = fx - p.x0;
+      p.near = span === 0 ? 1 : clamp01((p.x - p.x0) / span);
       const hit = p.from > 0 ? p.x >= fx : p.x <= fx;
       if (hit) {
         act.splice(i, 1); pool.push(p);
@@ -235,12 +327,35 @@ const Ammo = (function () {
 
     for (let i = 0; i < act.length; i++) {
       const p = act[i];
-      const tail = p.hx[(p.hi + 1) & 7];        // 七帧前的位置，拖尾带拉到这里
+      const au = AURA[p.item] || [255, 140, 60];
+      const auStr = `rgb(${au[0]},${au[1]},${au[2]})`;
+      const tex = aura(au);
+      /* 这一发拖多长。色晕、拖尾、残影全按它摊开，所以三层永远是对齐的 ——
+         分别写死各自的长度，快件和大件总有一头对不上。 */
+      const reach = reachOf(p);
+      const tail = p.hx[backAt(p, reach)];
 
-      /* 拖尾带：从轨迹最老的那一点收拢到本体。用暗调而不是亮色 —— 明亮客厅
-         底图上浅色线几乎看不见，跟粒子配色是同一条规矩：靠轮廓不靠亮度。
-         它的长度不是写死的，是这一发**实际飞过**的距离，所以速度抖动一上来
-         就看得出谁快谁慢。 */
+      /* ① 弹道色晕：沿真实轨迹摆三团，越靠后越小越淡。
+         光要铺满整条路径 —— 只挂在本体上的话弹道本身是暗的，读出来是"一个
+         发光的东西在移动"，而不是"它带着一道光在走"。
+         只比本体大半圈：色晕一大就把物品洗白了，浅粉的被子会整块糊成发光板，
+         格纹和翻角全没了。它该是物体边缘的一圈光，不是一团雾。
+         越接近对抗线越浓：命中前的最后一段自己会烧起来。 */
+      ctx.save();
+      const gk = 0.34 + p.near * 0.40;
+      for (let k = 2; k >= 0; k--) {
+        const idx = k ? backAt(p, reach * k * 0.33) : p.hi;
+        const f = 1 - k * 0.19;
+        ctx.globalAlpha = gk * f * f;
+        const gw = p.r * 1.55 * f, gh = p.r * 1.18 * f;
+        ctx.drawImage(tex, p.hx[idx] - gw, p.y - gh, gw * 2, gh * 2);
+      }
+      ctx.restore();
+
+      /* ② 拖尾带：从轨迹上 reach 那么远的一点收拢到本体。用暗调而不是亮色
+         —— 明亮客厅底图上浅色线几乎看不见，跟粒子配色是同一条规矩：靠轮廓
+         不靠亮度。长度是这一发**实际飞过**的距离，所以速度抖动一上来就看得
+         出谁快谁慢。 */
       ctx.save();
       ctx.globalAlpha = 0.30;
       ctx.fillStyle = `rgb(${TAIL[p.item] || '52,40,36'})`;
@@ -251,26 +366,43 @@ const Ammo = (function () {
       ctx.lineTo(tail, p.y + p.r * 0.06);
       ctx.closePath();
       ctx.fill();
+
+      /* ③ 弹道亮芯：压在暗拖尾中间的一条细楔子。两条都要 —— 只有暗的读成
+         一道划痕，只有亮的在浅底图上又浮不起来；暗的给实体感，亮的给能量感。 */
+      ctx.globalAlpha = 0.48;
+      ctx.fillStyle = auStr;
+      ctx.beginPath();
+      ctx.moveTo(tail, p.y);
+      ctx.lineTo(p.x, p.y - p.r * 0.26);
+      ctx.lineTo(p.x, p.y + p.r * 0.26);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
 
-      /* 残影：在它前四帧待过的地方，把同一个东西再画一遍，越 old 越淡越小。
-         带描边一起画 —— 这是赛璐璐里的速度残影，不是发光拖影，少了那圈线
-         就糊成一片。
+      /* ④ 残影：在它身后 reach 的四分之一、二分之一…处，把**外轮廓**再画
+         一遍，越远越淡越小。只画轮廓不画内部细节 —— 缝线、按键、格纹在高速
+         移动里糊成噪点，而且四个残影就是四遍完整物品，那是这个文件里最贵的
+         一笔开销。
 
-         取连续四帧而不是每隔一帧。隔帧取的话残影之间的空隙比物体本身还宽，
-         读出来是"一串独立的小东西"而不是"一个东西拖出来的影"。长度交给
-         下面那条拖尾带去表达，残影只负责把中间填实。 */
+         用拖尾那个暗调，不用色晕色。残影是**物体的形状**，跟色晕、亮芯不是
+         一回事 —— 三层全用同一个高饱和色的话，它们会融成一条实色带，形状
+         就没了。发光的靠色相，实体的靠轮廓，这条规矩在这里同样成立。
+
+         间距按距离均分，所以残影之间永远接得上：间距大于物体宽度的话读出来
+         是"一串独立的小东西"，而不是"一个东西拖出来的影"。 */
       ctx.save();
-      ctx.lineJoin = 'round';
+      ctx.fillStyle = `rgb(${TAIL[p.item] || '52,40,36'})`;
+      const silh = SILH[p.item];
       for (let k = 4; k >= 1; k--) {
-        const idx = (p.hi + 8 - k) & 7;
-        ctx.globalAlpha = 0.42 - k * 0.075;
+        const idx = backAt(p, reach * k * 0.25);
+        ctx.globalAlpha = 0.40 - k * 0.068;
         ctx.save();
         ctx.translate(p.hx[idx], p.y);
         ctx.rotate(p.hr[idx]);
-        const sc = 1 - k * 0.045;
+        const sc = 1 - k * 0.05;
         ctx.scale(sc, sc);
-        ITEM[p.item](ctx, p.r);
+        silh(ctx, p.r);
+        ctx.fill();
         ctx.restore();
       }
       ctx.restore();

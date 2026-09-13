@@ -24,6 +24,8 @@ const Particles = (function () {
   let shake = 0;             // 屏幕震动强度（像素）
   let flash = 0;             // 全屏白闪 0..1
   let stop = 0;              // 顿帧剩余时长（秒）
+  let cool = 0;              // 顿帧不应期剩余：这段时间里只接受更重的一击
+  let lvl = 0;               // 正在演的这次顿帧有多重，用来判断谁能打断谁
   const off = { x: 0, y: 0 };   // 当前震动偏移，main.js 读它来平移整个画面
 
   /* ---------- 预渲染贴图 ---------- */
@@ -100,6 +102,12 @@ const Particles = (function () {
     p.spin = o.spin || 0;      // 绕出生点公转的半径，星星绕头转用
     p.sway = o.sway || 0;      // 横向摆幅，羽毛飘落用
     p.seed = Math.random() * 6.283;
+    /* 颜色串和贴图在出生时就定下来。它们整个生命周期都不变，而写在 draw 里
+       就是每帧、每颗粒子都重新拼一次字符串、让浏览器重新解析一次颜色 ——
+       场上常有三五百颗粒子，这笔账一秒钟要算上万次。 */
+    p.fill = `rgb(${p.rgb[0]},${p.rgb[1]},${p.rgb[2]})`;
+    p.line = p.edge ? `rgb(${p.edge[0]},${p.edge[1]},${p.edge[2]})` : null;
+    p.tex = p.kind === 'soft' ? soft(p.rgb) : p.kind === 'dot' ? glow(p.rgb) : null;
     act.push(p);
     return p;
   }
@@ -163,7 +171,7 @@ const Particles = (function () {
       ctx.globalAlpha = alpha;
       if (p.kind === 'soft') {
         const r = p.r + (p.r1 - p.r) * (1 - k);
-        ctx.drawImage(soft(p.rgb), p.x - r, p.y - r, r * 2, r * 2);
+        ctx.drawImage(p.tex, p.x - r, p.y - r, r * 2, r * 2);
       } else if (p.kind === 'star') {
         const r = p.r + (p.r1 - p.r) * (1 - k);
         const ph = p.seed + (1 - k) * 7.4;
@@ -172,9 +180,9 @@ const Particles = (function () {
                       p.y + (p.spin ? Math.sin(ph) * p.spin * 0.42 : 0));
         ctx.rotate(p.rot);
         starPath(ctx, r);
-        ctx.fillStyle = `rgb(${p.rgb[0]},${p.rgb[1]},${p.rgb[2]})`;
+        ctx.fillStyle = p.fill;
         ctx.fill();
-        if (p.edge) { ctx.lineWidth = p.lw; ctx.strokeStyle = `rgb(${p.edge[0]},${p.edge[1]},${p.edge[2]})`; ctx.stroke(); }
+        if (p.line) { ctx.lineWidth = p.lw; ctx.strokeStyle = p.line; ctx.stroke(); }
         ctx.restore();
       } else {
         ctx.save();
@@ -182,8 +190,8 @@ const Particles = (function () {
         ctx.rotate(p.rot);
         // 翻滚时按 cos 压扁，读起来是一片薄东西在空中打转
         const hh = p.h / 2 * Math.abs(Math.cos(p.rot * 1.7));
-        ctx.fillStyle = `rgb(${p.rgb[0]},${p.rgb[1]},${p.rgb[2]})`;
-        if (p.edge) {
+        ctx.fillStyle = p.fill;
+        if (p.line) {
           // 胶囊形：羽毛和碎屑都不是方砖，描边一上去直角就很扎眼。圆角给到
           // 半高的满值，短边直接收成半圆 —— 长宽比大的时候读成羽毛，接近
           // 正方的时候读成碎片，一个形状覆盖两种题材。
@@ -191,7 +199,7 @@ const Particles = (function () {
           const rr = Math.min(p.w, hh * 2) * 0.5;
           ctx.roundRect(-p.w / 2, -hh, p.w, hh * 2, rr);
           ctx.fill();
-          ctx.lineWidth = p.lw; ctx.strokeStyle = `rgb(${p.edge[0]},${p.edge[1]},${p.edge[2]})`;
+          ctx.lineWidth = p.lw; ctx.strokeStyle = p.line;
           ctx.stroke();
         } else {
           ctx.fillRect(-p.w / 2, -hh, p.w, hh * 2);
@@ -211,17 +219,16 @@ const Particles = (function () {
       const alpha = p.a * fade(p);
       if (alpha <= 0.01) continue;
       ctx.globalAlpha = alpha;
-      const rgb = p.rgb;
 
       if (p.kind === 'dot') {
         const r = p.r + (p.r1 - p.r) * (1 - k);
-        ctx.drawImage(glow(rgb), p.x - r, p.y - r, r * 2, r * 2);
+        ctx.drawImage(p.tex, p.x - r, p.y - r, r * 2, r * 2);
 
       } else if (p.kind === 'spark') {
         const sp = Math.hypot(p.vx, p.vy);
         const len = Math.min(26, 4 + sp * 0.028);
         const nx = sp ? p.vx / sp : 1, ny = sp ? p.vy / sp : 0;
-        ctx.strokeStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+        ctx.strokeStyle = p.fill;
         ctx.lineWidth = p.lw;
         ctx.lineCap = 'round';
         ctx.beginPath();
@@ -231,7 +238,7 @@ const Particles = (function () {
 
       } else if (p.kind === 'ring') {
         const r = p.r + (p.r1 - p.r) * (1 - k);
-        ctx.strokeStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+        ctx.strokeStyle = p.fill;
         ctx.lineWidth = p.lw * k + 0.6;
         ctx.beginPath();
         ctx.ellipse(p.x, p.y, r, r * 0.5, 0, 0, 6.2832);
@@ -257,14 +264,31 @@ const Particles = (function () {
   /* 顿帧：返回本帧实际该走多少时间。命中瞬间把世界冻住，其余照常。
      注意冻的是游戏时间不是渲染 —— 画面照常刷新，只是一切都不动。 */
   function tick(dt) {
+    if (cool > 0) { cool -= dt; if (cool <= 0) lvl = 0; }
     if (stop > 0) { stop -= dt; return 0; }
     return dt;
   }
 
-  function hitStop(sec) { stop = Math.max(stop, sec); }
+  /* 顿帧必须有不应期。
+     "冻住"之所以有力，是因为它打断了流动 —— 而连点时命中本来就是连续的，
+     每一击都冻的话顿帧首尾相接，世界就长期停摆：帧率一点没掉，观众却读成
+     "卡了"。实测连点时有 65% 的帧是冻住的，把礼物间隔放宽三倍还是 65%，
+     说明撑起它的不是礼物密度，是"每一击都冻"这条规则本身。
+     所以冻完之后，要让世界正常流动更长的一段时间。比例给到 1:2 而不是 1:1：
+     命中越密集，顿帧越该退让 —— 每秒有九件礼物落地的时候根本没有"这一击"
+     可言，观众要看的是整体的热闹，而一半时间不动的画面只会读成掉帧。
+     更重的一击可以打断正在演的那一次 —— 大礼物压过点赞，这个优先级跟别处
+     是一致的。 */
+  function hitStop(sec) {
+    if (sec <= 0) return;
+    if (cool > 0 && sec <= lvl) return;
+    stop = Math.max(stop, sec);
+    lvl = sec;
+    cool = sec * 3;          // 冻 sec，再流动 2*sec —— 占空比到顶三分之一
+  }
   function addShake(v) { shake = Math.min(30, shake + v); }
   function addFlash(v) { flash = Math.max(flash, v); }
-  function clear() { while (act.length) pool.push(act.pop()); shake = flash = stop = 0; }
+  function clear() { while (act.length) pool.push(act.pop()); shake = flash = stop = cool = lvl = 0; }
 
   return {
     spawn, update, draw, drawFlash, tick,

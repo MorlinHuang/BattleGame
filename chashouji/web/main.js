@@ -129,7 +129,10 @@ function impact(side, y, power, recipe) {
 
   Particles.addShake(7 * s);
   Particles.addFlash(power >= 3 ? 0.22 : power >= 2 ? 0.10 : 0.03);
-  Particles.hitStop(power >= 3 ? 0.11 : power >= 2 ? 0.07 : 0.035);
+  /* 点赞级不顿帧。连珠一串八颗，每颗都冻 35ms 的话，这串"哒哒哒"就被拆成
+     八次停顿 —— 而它的表现力全在快。顿帧留给看得出分量的那两档，在那里它
+     才是"全世界停下来看这一击"，而不是一段接一段的停摆。 */
+  Particles.hitStop(power >= 3 ? 0.11 : power >= 2 ? 0.07 : 0);
 
   r.burst(x, y, side, s);
 }
@@ -369,12 +372,15 @@ class FrameSeq {
     const k = 1 + (punch || 0);
     const w = FRAME_W * k, h = FRAME_H * k;
     const foot = FRAME_TOP + FRAME_H;
-    ctx.drawImage(this.imgs[i], offsetX + (FRAME_W - w) / 2, foot - h, w, h);
+    const dx = offsetX + (FRAME_W - w) / 2;
+    ctx.drawImage(this.imgs[i], dx, foot - h, w, h);
     if (tintA > 0.004) {
       ctx.save();
       ctx.globalCompositeOperation = 'source-atop';
       ctx.fillStyle = rgba(tint, tintA);
-      ctx.fillRect(0, 0, W, H);
+      // source-atop 只会落在已经画出来的像素上，所以填满整张画布是白费的 ——
+      // 角色帧就占中间那条横带，按它的实际矩形填，结果一模一样
+      ctx.fillRect(dx, foot - h, w, h);
       ctx.restore();
     }
     this.shown = i;
@@ -589,6 +595,10 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     },
   });
 
+  /* 气泡挂在手机上 —— phonePos 是对抗线在手机高度上的横坐标，跟手机、刻度尺、
+     地面辉光同一个源，所以消息永远是从正在被抢的那部手机里冒出来的。 */
+  Bubble.init({ phoneAt: phonePos });
+
   const bg = await load('assets/bg.jpg');
   /* 每 1% 一张。缺的档位解码失败是预期内的，取 null 交给 FrameSeq 映射到邻居。 */
   const frames = await Promise.all(
@@ -612,10 +622,12 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
      房间和地毯不动：机位是固定的，整幅画面一起震就得把背景放大做 overscan
      才不露边，而背景一放大，地毯四角那组标定坐标就全偏了。HUD 也不震，它
      不在场景里。 */
-  function render() {
+  /* 拆成三段是因为它本来就是三张画布、三种代价：底版每帧重画一张 960x1334
+     的照片，角色每帧重画一张 900 高的 PNG，特效层则随着场上有多少东西线性
+     涨。"哪一层在拖后腿"只有分开计时才答得出，而合在一个函数里就只能猜。 */
+  function renderBg() {
     const bias = (S.p - 50) / 50;
     const ox = Particles.off.x, oy = Particles.off.y;
-
     bctx.clearRect(0, 0, W, H);
     bctx.drawImage(bg, 0, 0, W, H);
     drawGround(bctx, bias);
@@ -623,12 +635,19 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     if (S.line === 1) drawLine(bctx);
     else if (S.line === 2) drawFrontGround(bctx, bias);
     bctx.restore();
+  }
 
+  function renderActors() {
+    const ox = Particles.off.x, oy = Particles.off.y;
     cctx.clearRect(0, 0, W, H);
     cctx.save(); cctx.translate(ox, oy);
     seq.draw(cctx, S.p, FX.actorX, FX.punch, FX.tint, FX.tintA);
     cctx.restore();
+  }
 
+  function renderFx() {
+    const bias = (S.p - 50) / 50;
+    const ox = Particles.off.x, oy = Particles.off.y;
     fctx.clearRect(0, 0, W, H);
     fctx.save(); fctx.translate(ox, oy);
     /* line=1 要在角色之上再叠一遍，否则光柱全程被两具身体挡死；line=2 的
@@ -636,6 +655,8 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     if (S.line === 1) drawLine(fctx, 0.42);
     else if (S.line >= 2) drawFrontMark(fctx, bias);
     drawRuler(fctx);
+    // 气泡在弹幕之下：它贴在后面那堵墙上，弹幕是前景，飞过时该压过去
+    Bubble.draw(fctx);
     /* 弹幕在角色之上、粒子之下：它飞向两个人中间，画在角色底下的话命中前
        最后那段就被身体挡掉了；而粒子是命中的爆炸，该盖在弹幕上面。 */
     Ammo.draw(fctx);
@@ -644,6 +665,8 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     drawHUD(fctx, S.p);
     Particles.drawFlash(fctx, W, H);
   }
+
+  function render() { renderBg(); renderActors(); renderFx(); }
 
   /* ?strip=N 出一条连帧胶片：一次看清 N 个档位之间过不过得去。
      动画在静止截图里看不出问题，只有把相邻档位并排摆着才看得出哪一格在跳。 */
@@ -699,6 +722,7 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
         const d = Particles.tick(1 / 60);
         Particles.update(1 / 60);
         Ammo.update(d);
+        Bubble.update(d, FX.struggle);
         derive(d);
       }
       el += step;
@@ -713,6 +737,45 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
         o.fillStyle = '#ffd36b';
         o.fillText(`${gname} · ${g.style} · p=${S.p.toFixed(0)}`, dx + 8, 42);
       }
+    }
+    const stage = document.getElementById('stage');
+    stage.style.width = out.width + 'px';
+    stage.style.aspectRatio = `${out.width}/${out.height}`;
+    stage.innerHTML = '';
+    out.style.cssText = 'position:absolute;inset:0;width:100%;height:100%';
+    stage.appendChild(out);
+    return;
+  }
+
+  /* ?bubblestrip=N 专看气泡：每格推一条，四种轮流。
+     混在别的胶片里碰运气是拍不到的 —— 气泡自己按一两秒的节奏随机冒，想看
+     的那一种（比如语音条、撤回提示）多半正好没出现；而要检查的恰恰是它们
+     堆起来之后挡不挡脸、四种底色在这张墙上分不分得开。
+     ?bubblems=M 每格间隔，默认 420ms。 */
+  if (Q.has('bubblestrip')) {
+    const n = clamp(+Q.get('bubblestrip') | 0, 2, 12);
+    const MS = clamp(+(Q.get('bubblems') || 420), 16, 2000) / 1000;
+    const sc = 0.5, types = ['text', 'hot', 'sys', 'voice'];
+    S.auto = false; S.t = 3.0;
+    for (let k = 0; k < 150; k++) derive(1 / 60);
+    Bubble.clear();
+
+    const out = document.createElement('canvas');
+    out.width = n * W * sc; out.height = H * sc;
+    const o = out.getContext('2d');
+    o.fillStyle = '#0c0e12'; o.fillRect(0, 0, out.width, out.height);
+    for (let i = 0; i < n; i++) {
+      Bubble.push(types[i % 4]);
+      for (let k = 0; k < Math.max(1, Math.round(MS * 60)); k++) {
+        Bubble.update(1 / 60, FX.struggle);
+        derive(1 / 60);
+      }
+      render();
+      const dx = i * W * sc;
+      for (const c of [cvBg, cvCh, cvFx]) o.drawImage(c, dx, 0, W * sc, H * sc);
+      o.fillStyle = 'rgba(0,0,0,.70)'; o.fillRect(dx, 0, 150, 26);
+      o.fillStyle = '#ffd36b'; o.font = '600 15px system-ui';
+      o.fillText(`+${Math.round(i * MS * 1000)}ms 气泡${Bubble.count()}`, dx + 8, 18);
     }
     const stage = document.getElementById('stage');
     stage.style.width = out.width + 'px';
@@ -802,6 +865,103 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     return;
   }
 
+  /* ?bench=1 —— 连点压测。"卡不卡"是主观的，而它在静止截图里完全不存在：
+     要么拿到每一帧的真实耗时，要么就是在猜。这个模式关掉自动演示、用固定
+     dt 推进（弹幕节奏每次跑都一样，两次测量才可比），按 benchrate 的间隔
+     轮流发六件礼物，逐层计时，最后把读数画在画布上 —— 读数得跟着截图一起
+     出来，否则在无头环境里取不回来。
+
+     ?benchoff=ammo|part|both 用差值法定位热点：把某一层的绘制换成空函数再
+     跑一遍，两次的差就是那一层的代价。比在渲染代码里埋计时点干净 ——
+     生产代码一行都不用改。 */
+  if (Q.has('bench')) {
+    const N = clamp(+(Q.get('benchframes') || 420), 60, 2000);
+    const RATE = clamp(+(Q.get('benchrate') || 110), 40, 2000) / 1000;
+    const bOff = Q.get('benchoff') || '';
+    if (bOff === 'ammo' || bOff === 'both') Ammo.draw = () => {};
+    if (bOff === 'part' || bOff === 'both') Particles.draw = () => {};
+
+    const gnames = Object.keys(GIFT);
+    const T = { logic: 0, bg: 0, ch: 0, fx: 0, all: 0 };
+    const each = new Float64Array(N);
+    const M = { logic: 0, bg: 0, ch: 0, fx: 0, all: 0, at: 0 };
+    let bi = 0, bacc = 0, gi = 0, maxP = 0, maxA = 0, sumP = 0, sumA = 0, drops = 0, froze = 0;
+    S.auto = false; S.p = 50; S.t = 3.0;
+    document.getElementById('auto').checked = false;
+    for (let k = 0; k < 150; k++) derive(1 / 60);
+
+    const benchStep = () => {
+      const dt = 1 / 60;
+      const t0 = performance.now();
+      bacc += dt;
+      if (bacc >= RATE) { bacc -= RATE; Ammo.launch(GIFT[gnames[gi++ % gnames.length]]); }
+      const d = Particles.tick(dt);
+      /* 冻结帧占比 —— 帧率正常但画面不动，观众读到的同样是"卡"。每次命中
+         都冻 35~110ms，而连点时命中是密集的，顿帧会一段一段接上。这个数
+         在耗时曲线上完全看不出来：那些帧的渲染一切正常，只是世界没动。 */
+      if (d === 0) froze++;
+      Particles.update(dt);
+      Ammo.update(d);
+      Bubble.update(d, FX.struggle);
+      S.t += d;
+      derive(d);
+      const t1 = performance.now(); renderBg();
+      const t2 = performance.now(); renderActors();
+      const t3 = performance.now(); renderFx();
+      const t4 = performance.now();
+      T.logic += t1 - t0; T.bg += t2 - t1; T.ch += t3 - t2; T.fx += t4 - t3; T.all += t4 - t0;
+      each[bi] = t4 - t0;
+      /* 均值说明不了卡顿 —— 均值 3ms 的同时可以有一帧 39ms，而观众看到的
+         就是那一帧。所以每层都要留峰值，否则只知道"有尖峰"，不知道尖峰在
+         哪一层；再记下它出现在第几帧，用来分辨"开头一次性的预热"和"运行中
+         周期性发作"。 */
+      if (t1 - t0 > M.logic) M.logic = t1 - t0;
+      if (t2 - t1 > M.bg) M.bg = t2 - t1;
+      if (t3 - t2 > M.ch) M.ch = t3 - t2;
+      if (t4 - t3 > M.fx) M.fx = t4 - t3;
+      if (t4 - t0 > M.all) { M.all = t4 - t0; M.at = bi; }
+      if (t4 - t0 > 16.7) drops++;
+      const np = Particles.count(), na = Ammo.count();
+      sumP += np; sumA += na;
+      if (np > maxP) maxP = np;
+      if (na > maxA) maxA = na;
+      if (++bi < N) { requestAnimationFrame(benchStep); return; }
+
+      const sorted = Array.from(each).sort((a, b) => a - b);
+      const p95 = sorted[Math.floor(N * 0.95)], worst = sorted[N - 1];
+      const rows = [
+        `连点压测  ${N} 帧 · 每 ${Math.round(RATE * 1000)}ms 一件礼物` + (bOff ? `  [关掉 ${bOff}]` : ''),
+        ``,
+        `           均值      峰值`,
+        `每帧总计   ${(T.all / N).toFixed(2)}      ${M.all.toFixed(1)} ms  (第 ${M.at} 帧)`,
+        `  逻辑     ${(T.logic / N).toFixed(2)}      ${M.logic.toFixed(1)}`,
+        `  底版层   ${(T.bg / N).toFixed(2)}      ${M.bg.toFixed(1)}`,
+        `  角色层   ${(T.ch / N).toFixed(2)}      ${M.ch.toFixed(1)}`,
+        `  特效层   ${(T.fx / N).toFixed(2)}      ${M.fx.toFixed(1)}`,
+        ``,
+        `p95 ${p95.toFixed(2)}ms   掉帧(>16.7ms) ${drops}/${N} = ${(drops * 100 / N).toFixed(1)}%`,
+        `世界被顿帧冻住 ${froze}/${N} 帧 = ${(froze * 100 / N).toFixed(1)}%`,
+        `粒子 均 ${(sumP / N).toFixed(0)} 峰 ${maxP}     弹幕 均 ${(sumA / N).toFixed(1)} 峰 ${maxA}`,
+        `16.7ms = 60fps    33.3ms = 30fps`,
+      ];
+      fctx.fillStyle = 'rgba(6,8,12,.93)';
+      fctx.fillRect(24, 150, W - 48, 46 + rows.length * 42);
+      fctx.strokeStyle = '#ffd36b'; fctx.lineWidth = 3;
+      fctx.strokeRect(24, 150, W - 48, 46 + rows.length * 42);
+      fctx.textAlign = 'left'; fctx.textBaseline = 'middle';
+      rows.forEach((r, k) => {
+        fctx.font = (k === 0 ? 'bold 30px ' : '600 30px ') + 'ui-monospace,Menlo,monospace';
+        fctx.fillStyle = k === 0 ? '#ffd36b' : (k === 2 ? '#8fe3ff' : '#e8ecf2');
+        fctx.fillText(r, 48, 196 + k * 42);
+      });
+      document.getElementById('stat').textContent = rows.join(' | ');
+      // 无头环境里没法按时间猜跑完没跑完，用标题当完成信号，外面轮询它
+      document.title = 'BENCHDONE';
+    };
+    requestAnimationFrame(benchStep);
+    return;
+  }
+
   let last = performance.now(), fps = 0, fr = 0, acc = 0, dir = 1;
   function frame(now) {
     const raw = Math.min(.05, (now - last) / 1000); last = now;
@@ -817,6 +977,8 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
        这一下"的可视化，冻住它就迟到了；而正在飞的弹幕是**下一下**的前奏，
        顿帧的意思就是全世界停下来看这一击，此刻别的东西还在飞就散掉了。 */
     Ammo.update(dt);
+    // 气泡跟着逻辑时钟：顿帧时它也该停，那半秒全世界都在看刚才那一击
+    Bubble.update(dt, FX.struggle);
     S.t += dt;
 
     if (S.auto) {
