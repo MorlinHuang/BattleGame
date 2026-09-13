@@ -103,6 +103,14 @@ const Ammo = (function () {
     },
   };
 
+  /* 拖尾带的颜色：每件物品自己主色的暗调，不是统一的黑。统一用深色的话，
+     拖在浅粉抱枕后面读起来像一团影子或者污渍 —— 那是"另一个东西"，而拖尾
+     应该是它自己甩出来的。 */
+  const TAIL = {
+    hairpin: '176,64,112', seed: '58,42,26', pillow: '196,116,150',
+    gamepad: '38,46,58', quilt: '198,112,148', box: '126,82,48',
+  };
+
   /* ---------- 发射 ---------- */
 
   /* 重投给到 850 而不是更慢。直觉上"大件就该飞得慢"，但屏幕外到对抗线只有
@@ -115,6 +123,10 @@ const Ammo = (function () {
      什么"的那一段。加速两头都要：前段慢得认得出，后段砸得狠，总时长还短了
      三分之一。 */
   const ACC = { heavy: 900 };
+  /* 每一发在基准速度上再抖一下。整批同速看着像传送带上排好的货，而连珠本来
+     该读成"抓一把撒过去"—— 有的先到有的后到，命中的节奏才是碎的。
+     重投抖得最少：它有预警，观众在等那一下，节奏不该飘。 */
+  const JIT = { volley: 0.34, single: 0.26, heavy: 0.10 };
 
   /* g 是 main.js 的 GIFT 表里的一行。fixedY 只给诊断胶片用 —— 随机高度会让
      每次截出来的图不一样，没法比。 */
@@ -145,12 +157,17 @@ const Ammo = (function () {
     p.g = g; p.item = g.item; p.r = g.r; p.y = q.y;
     p.from = g.from;
     p.x = g.from > 0 ? -g.r - 40 : W + g.r + 40;
-    p.vx = g.from * sp;
+    p.vx = g.from * sp * (1 + (Math.random() - 0.5) * 2 * (JIT[g.style] || 0.2));
     p.ax = ACC[g.style] || 0;
     p.rot = Math.random() * 6.283;
-    // 转速跟着体量走：小东西翻得快，大件几乎不转 —— 转快了就看不出是什么
-    p.vrot = (Math.random() - 0.5) * (g.style === 'volley' ? 15 : g.style === 'single' ? 7 : 1.8);
-    p.trail = g.style === 'heavy' ? 5 : g.style === 'single' ? 3 : 2;
+    // 转速跟着体量走，小东西翻得快。方向也随机，一批里有顺时针有逆时针
+    p.vrot = (Math.random() - 0.5) * (g.style === 'volley' ? 26 : g.style === 'single' ? 13 : 4.5);
+    /* 轨迹环形缓冲：拖尾画的是这个东西**真正走过**的地方。原先那几条速度线
+       是固定画在本体后方的，跟实际路径无关，所以飞得快飞得慢看上去一个样；
+       记下真实轨迹之后，拖尾长度自己就跟速度挂上钩了。 */
+    p.hx = p.hx || new Float64Array(8);
+    p.hr = p.hr || new Float64Array(8);
+    p.hx.fill(p.x); p.hr.fill(p.rot); p.hi = 0;
     act.push(p);
   }
 
@@ -174,6 +191,9 @@ const Ammo = (function () {
       /* 重投在途中让画面一直轻轻发抖。每帧加的这一点点会被 0.86/帧 的衰减
          吃掉，稳态就在 1px 上下 —— 不是震动，是压迫感。 */
       if (p.g.style === 'heavy') Particles.addShake(0.15);
+
+      p.hi = (p.hi + 1) & 7;
+      p.hx[p.hi] = p.x; p.hr[p.hi] = p.rot;
 
       const fx = frontAt(p.y);
       const hit = p.from > 0 ? p.x >= fx : p.x <= fx;
@@ -215,24 +235,46 @@ const Ammo = (function () {
 
     for (let i = 0; i < act.length; i++) {
       const p = act[i];
-      /* 速度线画成深色而不是白色。明亮客厅底图上白线几乎看不见，这一条
-         跟粒子配色是同一条规矩：实体与线条靠轮廓，不靠亮度。 */
-      if (p.trail) {
+      const tail = p.hx[(p.hi + 1) & 7];        // 七帧前的位置，拖尾带拉到这里
+
+      /* 拖尾带：从轨迹最老的那一点收拢到本体。用暗调而不是亮色 —— 明亮客厅
+         底图上浅色线几乎看不见，跟粒子配色是同一条规矩：靠轮廓不靠亮度。
+         它的长度不是写死的，是这一发**实际飞过**的距离，所以速度抖动一上来
+         就看得出谁快谁慢。 */
+      ctx.save();
+      ctx.globalAlpha = 0.30;
+      ctx.fillStyle = `rgb(${TAIL[p.item] || '52,40,36'})`;
+      ctx.beginPath();
+      ctx.moveTo(tail, p.y - p.r * 0.06);
+      ctx.lineTo(p.x, p.y - p.r * 0.5);
+      ctx.lineTo(p.x, p.y + p.r * 0.5);
+      ctx.lineTo(tail, p.y + p.r * 0.06);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      /* 残影：在它前四帧待过的地方，把同一个东西再画一遍，越 old 越淡越小。
+         带描边一起画 —— 这是赛璐璐里的速度残影，不是发光拖影，少了那圈线
+         就糊成一片。
+
+         取连续四帧而不是每隔一帧。隔帧取的话残影之间的空隙比物体本身还宽，
+         读出来是"一串独立的小东西"而不是"一个东西拖出来的影"。长度交给
+         下面那条拖尾带去表达，残影只负责把中间填实。 */
+      ctx.save();
+      ctx.lineJoin = 'round';
+      for (let k = 4; k >= 1; k--) {
+        const idx = (p.hi + 8 - k) & 7;
+        ctx.globalAlpha = 0.42 - k * 0.075;
         ctx.save();
-        ctx.lineCap = 'round';
-        for (let k = 0; k < p.trail; k++) {
-          const off = (k + 1) * p.r * 0.55;
-          const ty = p.y + (k % 2 ? 1 : -1) * p.r * (0.2 + k * 0.13);
-          ctx.globalAlpha = 0.42 * (1 - k / p.trail);
-          ctx.lineWidth = p.r * 0.22;
-          ctx.strokeStyle = 'rgb(58,46,42)';
-          ctx.beginPath();
-          ctx.moveTo(p.x - p.from * off, ty);
-          ctx.lineTo(p.x - p.from * (off + p.r * (0.9 + k * 0.5)), ty);
-          ctx.stroke();
-        }
+        ctx.translate(p.hx[idx], p.y);
+        ctx.rotate(p.hr[idx]);
+        const sc = 1 - k * 0.045;
+        ctx.scale(sc, sc);
+        ITEM[p.item](ctx, p.r);
         ctx.restore();
       }
+      ctx.restore();
+
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.rotate(p.rot);
