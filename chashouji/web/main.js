@@ -298,9 +298,13 @@ function impact(side, y, power, recipe) {
 
   FX.hitV += -side * 320 * s;
   FX.punch = Math.max(FX.punch, 0.045 * s);
-  /* 染色只是"挨了一下"的提示，不是照明。超过 0.2 角色的线稿和睡衣花纹就被
-     洗掉了，而那正是这个玩法唯一能看的东西。 */
-  FX.tint = r.tint; FX.tintA = Math.max(FX.tintA, 0.15 * Math.min(1.4, s));
+  /* 染色只是"挨了一下"的提示，不是照明。超过 0.21 角色的线稿和睡衣花纹就被
+     洗掉了，而那正是这个玩法唯一能看的东西 —— 所以它有一个**可读性天花板**，
+     档 3 起就顶在那儿，档 4 不会更红。写成 min(天花板, …) 而不是 min(1.4, s)，
+     是因为后者看起来像"按分量缩放"，实际从档 3 就封死了，读代码会被骗一次。
+     档 4 强在独占那 0.8 秒，不在染得更狠。 */
+  const TINT_MAX = 0.21;
+  FX.tint = r.tint; FX.tintA = Math.max(FX.tintA, Math.min(TINT_MAX, 0.15 * s));
 
   Particles.addShake(7 * s);
   Particles.addFlash(power >= 4 ? 0.34 : power >= 3 ? 0.22 : power >= 2 ? 0.10 : 0.03);
