@@ -31,7 +31,47 @@ const P = {
   tintDecay: 0.82,   // 染色的衰减
 };
 
-const S = { p: 50, t: 0, auto: true, line: 3 };   // line: 0 全无 / 1 原发光柱 / 2 地面战线+指针 / 3 只要指针
+/* 数值参数表 —— 整局的手感全在这十来个数上，集中一处方便手改。
+   模型是**两层**的：礼物注入的是"火力"，双方火力互相对冲，**只有净差值**
+   才把手机往一边拽。两边火力相等时刷得再凶手机也不动 —— 那正是拔河该有的
+   样子，也是这个玩法最长的一段时间。
+   （错误的做法是让礼物直接加进度：那样没有对冲、先刷的人白刷、一次爆发就能
+   结束比赛。） */
+const NUM = {
+  BURN: 0.05,      // 对冲系数：双方等量消耗，由火力少的一方定速
+  LOSS: 0.012,     // 自然流失：势头会过去。时间常数 83 秒
+  DPS: 0.08,       // 每 1000 点火力差，每秒把手机推动几个百分点
+  /* 稳态时  净差 = 注入速度差 / LOSS  —— 对冲项在两边完全相同，推导时直接
+     消掉了。所以手机移动的快慢只取决于"两边刷礼物的速度差"，与刷了多少总量
+     无关：都在猛刷就差值小、画面激烈而手机不动；一方停手就立刻被拽走。 */
+  SHOT: 9,         // 每消耗这么多火力打出一发弹幕 —— 弹幕就是火力的消耗形式
+  MATCH: 720,      // 单局 12 分钟
+  EDGE_HOLD: 3,    // 推到端点还要按住这么久才算赢
+  SUDDEN_LEAD: 35, // 领先这么多个百分点，持续 SUDDEN_WAIT 秒就进绝杀
+  SUDDEN_WAIT: 60,
+  SUDDEN: 30,      // 绝杀倒计时
+  STAND_AT: 8,     // 进入最后这么多个百分点触发反击时刻
+  STAND: 120,      // 反击时刻时长：劣势方注入翻倍，全局只触发一次
+  SHIELD_AT: 10,   // 濒死护盾：最后这么多个百分点内，伤害先扣劣势方的火力
+  SHIELD_MAX: 0.75,// 濒死减伤的上限：再能扛也不能扛到推不动
+  /* 手机的最大速度。净差是没有上限的 —— 大哥一秒注入 600 而对面只有 80 时，
+     净差能到四万，折合 3.5 个百分点每秒，十四秒就从中点推到底。那不叫碾压，
+     那叫没有过程：观众还没看清发生了什么，比赛已经结束。
+     拔河的物理直觉也是这样 —— 再大的力气，手机也不可能瞬间飞过去。
+     0.85 表示最快也要一分钟才能从中点推到端点。 */
+  MAXDPS: 0.85,
+};
+
+const S = {
+  p: 50, t: 0, auto: true, line: 3,   // line: 0 全无 / 1 原发光柱 / 2 地面战线+指针 / 3 只要指针
+  fA: 0, fB: 0,                       // 火力：A=查岗党(左) B=灭迹党(右)
+  budA: 0, budB: 0,                   // 发射预算：火力消耗到一发弹幕的量就打一发
+  debA: 0, debB: 0, debKA: 0, debKB: 0,  // 受到的注入减益：剩余秒数与折扣
+  clock: 0, phase: 'idle',            // idle 不跑数值（诊断与老演示模式）/ play / sudden / over
+  edge: 0, big: 0, sudden: 0,
+  stand: 0, standUsed: false,
+  winner: 0,
+};
 const FX = {
   phoneX: MID, phoneY: P.phoneY,
   rowOff: new Array(ROWS).fill(0), rowHeat: new Array(ROWS).fill(0),
@@ -47,7 +87,142 @@ const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 // 帧率无关的指数趋近：min(1,dt*k) 会让节奏随帧率漂移
 const approach = (dt, k) => 1 - Math.exp(-k * dt);
 
-/* ---------- 单一真源 ---------- */
+/* ---------- 数值层：算出 S.p ---------- */
+
+/* battle 算"手机该往哪走"，derive 算"算出来之后画面长什么样"。分成两个函数
+   是因为它们回答的是两个问题，而把它们混在一起正是上一版最大的错误：礼物
+   直接改了 S.p，等于把火力这一层整个删掉了。 */
+function battle(dt) {
+  if (S.phase !== 'play' && S.phase !== 'sudden') return;
+
+  // 减益倒计时。它作用在**注入**上（见 giveGift），不作用在手机上
+  if (S.debA > 0 && (S.debA -= dt) <= 0) S.debKA = 0;
+  if (S.debB > 0 && (S.debB -= dt) <= 0) S.debKB = 0;
+  if (S.stand > 0) S.stand -= dt;
+
+  /* 对冲：双方等量消耗，速度由火力**少**的一方决定。
+     这一条是整个模型的关键，它自带一根橡皮筋 —— 劣势方火力少，所以流失慢、
+     补起来划算；而优势方想维持差距就得一直喂。不必另外再加"劣势方 x1.5"
+     那种补丁，橡皮筋是从机制里长出来的。 */
+  const lo = Math.min(S.fA, S.fB);
+  const burn = NUM.BURN * lo;
+  const useA = (burn + NUM.LOSS * S.fA) * dt;
+  const useB = (burn + NUM.LOSS * S.fB) * dt;
+  S.fA = Math.max(0, S.fA - useA);
+  S.fB = Math.max(0, S.fB - useB);
+
+  /* 打出去的火力就是屏幕上的弹幕。消耗多少就打多少发 —— 于是"对冲掉的那
+     部分"和"穿过去的那部分"在画面上是分开的：前者在中线撞掉，后者才砸到人
+     身上。观众刷了礼物手机没动时，屏幕上有答案：你的东西被对面在半空撞掉了。 */
+  const denA = burn + NUM.LOSS * S.fA, denB = burn + NUM.LOSS * S.fB;
+  S.budA += useA; S.budB += useB;
+  emitFire(+1, denA > 0 ? burn / denA : 0);
+  emitFire(-1, denB > 0 ? burn / denB : 0);
+
+  // 只有净差值才动手机
+  const diff = S.fA - S.fB;
+  let dmg = (diff / 1000) * NUM.DPS * dt;
+
+  /* 濒死护盾：快被推到头时，火力越足越扛得住。照搬螂人杀"最后 100 滴血，
+     兵力够就优先掉兵"的意图 —— 刷礼物能直接保命，而且看得见：火力条长就是
+     在替你挡。
+
+     ⚠️ 它**不能去扣火力存量**。试过那种写法，结果是一条正反馈：护盾吃掉劣势
+     方的火力 → min 变小 → 对冲跟着变弱 → 优势方的火力不再被烧掉 → 差值反而
+     越拉越大。实测净差冲到理论值（Δ注入/LOSS）的 2.4 倍，越接近终点崩得越快。
+     根因是火力同时担着两个职责：它既是护盾的燃料，又是对冲的输入，扣一处动
+     两处。所以护盾只能按**比例**减伤，不碰存量。 */
+  if (dmg !== 0) {
+    const losing = dmg > 0 ? -1 : +1;                    // 正在挨打的一方
+    const room = losing > 0 ? S.p : 100 - S.p;           // 他离输还有多远
+    if (room < NUM.SHIELD_AT) {
+      const mine = losing > 0 ? S.fA : S.fB, his = losing > 0 ? S.fB : S.fA;
+      const ratio = mine / (his + 1);
+      dmg *= 1 - Math.min(NUM.SHIELD_MAX, ratio * 1.5);
+    }
+  }
+  const cap = NUM.MAXDPS * dt;
+  if (dmg > cap) dmg = cap; else if (dmg < -cap) dmg = -cap;
+  S.p = clamp(S.p + dmg, 0, 100);
+
+  /* 反击时刻：第一次被推到最后 8 个百分点时，劣势方注入翻倍两分钟，全局只
+     触发一次。放大的是注入不是伤害 —— 在两层模型里，"更有力"只能是更多火力。 */
+  if (!S.standUsed && (S.p < NUM.STAND_AT || S.p > 100 - NUM.STAND_AT)) {
+    S.standUsed = true; S.stand = NUM.STAND;
+  }
+
+  // 绝杀：一直被压着就别耗了，给 30 秒最后的机会
+  const lead = Math.abs(S.p - 50) * 2;
+  if (S.phase === 'play') {
+    S.big = lead >= NUM.SUDDEN_LEAD * 2 ? S.big + dt : 0;
+    if (S.big >= NUM.SUDDEN_WAIT) { S.phase = 'sudden'; S.sudden = NUM.SUDDEN; }
+  } else if ((S.sudden -= dt) <= 0) { finish(S.p > 50 ? +1 : -1); return; }
+
+  /* 推到端点还得按住三秒。没有这一条，一次爆发擦过端点就结束比赛，前十分钟
+     全部作废 —— 观众读到的是"输得莫名其妙"，不是"输得精彩"。 */
+  if (S.p >= 100 || S.p <= 0) {
+    S.edge += dt;
+    if (S.edge >= NUM.EDGE_HOLD) { finish(S.p >= 100 ? +1 : -1); return; }
+  } else S.edge = 0;
+
+  if ((S.clock -= dt) <= 0) finish(S.p > 53 ? +1 : S.p < 47 ? -1 : 0);
+}
+
+function finish(who) { S.phase = 'over'; S.winner = who; }
+
+/* 火力转成弹幕。clash 的那些飞到中线就互相撞掉，只有剩下的才砸到人身上 ——
+   这是"对冲"唯一的可视化，没有它观众看不懂自己刷的东西去哪了。 */
+function emitFire(side, clashRatio) {
+  const bud = side > 0 ? 'budA' : 'budB';
+  let n = 0;
+  while (S[bud] >= NUM.SHOT && n < 3) { S[bud] -= NUM.SHOT; n++; }
+  for (let i = 0; i < n; i++) {
+    const g = GIFT[side > 0 ? 'hairpin' : 'seed'];
+    Ammo.launch(g, null, { one: true, clash: Math.random() < clashRatio });
+  }
+}
+
+/* 送一件礼物。数值走火力，表现走弹幕 —— 两件事同一个入口，但不是同一层。 */
+function giveGift(side, key) {
+  const it = SHOP[key]; if (!it) return;
+  const deb = side > 0 ? S.debKA : S.debKB;
+  const loser = S.p < 50 ? +1 : -1;                 // 谁正落后
+  const boost = (S.stand > 0 && side === loser) ? 2 : 1;
+  const amt = it.push * (1 - deb) * boost;
+  if (side > 0) S.fA += amt; else S.fB += amt;
+
+  /* 高档礼物的第二维度：压制。光靠 push 拉开差距会逼出很难看的数值，而
+     "让对方刷的每一件都打折"才是贵真正买到的东西。 */
+  if (it.tier === 3) hexDebuff(-side, 0.30, 5);
+  if (it.tier === 4) {
+    hexDebuff(-side, 0.50, 8);
+    // 直接削存量是唯一能瞬间改变差值的手段，也是翻盘的唯一来源
+    if (side > 0) S.fB *= 0.5; else S.fA *= 0.5;
+  }
+  if (it.tier >= 1) {
+    const g = GIFT[ITEM_OF[side > 0 ? 'L' : 'R'][it.tier]];
+    Ammo.launch(g, null, { gift: true, exec: it.tier === 4 });
+  } else {
+    // 免费档不飞实体，只在自己那侧冒一小串火花 —— 它买的是参与感，不是战力
+    RECIPE.star.burst(side > 0 ? 46 : W - 46, 300 + Math.random() * 520, -side, 0.3);
+  }
+}
+
+function hexDebuff(side, k, sec) {
+  if (side > 0) { S.debKA = Math.max(S.debKA, k); S.debA = Math.max(S.debA, sec); }
+  else { S.debKB = Math.max(S.debKB, k); S.debB = Math.max(S.debB, sec); }
+}
+
+function startMatch() {
+  S.p = 50; S.fA = S.fB = 0; S.budA = S.budB = 0;
+  S.debA = S.debB = S.debKA = S.debKB = 0;
+  S.clock = NUM.MATCH; S.phase = 'play';
+  S.edge = S.big = S.sudden = S.stand = 0; S.standUsed = false; S.winner = 0;
+  S.auto = false;
+  Ammo.clear(); Particles.clear();
+}
+
+/* ---------- 表现层：由 S.p 派生画面 ---------- */
 function derive(dt) {
   const bias = (S.p - 50) / 50;
   // p 大 = 查岗党(女方,在左)占优 = 手机被拽向左
@@ -111,7 +286,7 @@ function derive(dt) {
    power: 1 点赞级  2 普通礼物  3 大礼物 */
 function impact(side, y, power, recipe) {
   const r = recipe || RECIPE.thud;
-  const s = power === 1 ? 0.55 : power === 2 ? 1.0 : 1.7;
+  const s = power >= 4 ? 2.8 : power === 3 ? 1.7 : power === 2 ? 1.0 : 0.55;
   const x = frontAt(y);
 
   // 冲量注入命中高度那一行，方向朝被打的一侧
@@ -128,11 +303,13 @@ function impact(side, y, power, recipe) {
   FX.tint = r.tint; FX.tintA = Math.max(FX.tintA, 0.15 * Math.min(1.4, s));
 
   Particles.addShake(7 * s);
-  Particles.addFlash(power >= 3 ? 0.22 : power >= 2 ? 0.10 : 0.03);
+  Particles.addFlash(power >= 4 ? 0.34 : power >= 3 ? 0.22 : power >= 2 ? 0.10 : 0.03);
   /* 点赞级不顿帧。连珠一串八颗，每颗都冻 35ms 的话，这串"哒哒哒"就被拆成
      八次停顿 —— 而它的表现力全在快。顿帧留给看得出分量的那两档，在那里它
      才是"全世界停下来看这一击"，而不是一段接一段的停摆。 */
-  Particles.hitStop(power >= 3 ? 0.11 : power >= 2 ? 0.07 : 0);
+  /* 档 4 是"全世界停下来看这一击"：冻 320ms，配合 ammo.js 里的独占窗口，
+     这段时间别的礼物只排队不落地。它买的不是更大的数字，是一段没人打断的时间。 */
+  Particles.hitStop(power >= 4 ? 0.32 : power >= 3 ? 0.11 : power >= 2 ? 0.07 : 0);
 
   r.burst(x, y, side, s);
 }
@@ -307,27 +484,56 @@ const RECIPE = {
   },
 };
 
-/* 礼物表：一件礼物 = 谁发的 + 哪种样式 + 什么物品 + 命中落哪个配方 + 推多少进度。
-   加新礼物只加一行，ammo.js 和 fx.js 都不用动 —— 样式管节奏、配方管爆开的
-   形态，两边都是通用的。
+/* 礼物有两张表，因为它是两件事。
 
-   三种样式的差别是节奏与体量，不是物品：
-     volley 连珠  一串小件快速飞来，每颗单独命中，对应免费/点赞级
-     single 单投  单件中等速度，看得清是什么东西，对应普通礼物
-     heavy  重投  先预警再慢慢压过来，对应大礼物
+   SHOP —— **数值**。九件抖音平台礼物，相对价值直接继承《螂人杀》已验证的
+   兵数比例（push = 兵数 ÷ 100）：点赞 1、仙女棒 100、魔法镜 2000、
+   爱的爆炸 23000、神秘空投 60000……这一套在两个上线玩法里都跑过，不必重定。
+   push 注入的是**火力**，不是进度 —— 进度由双方火力的净差积分出来。
+
+   GIFT —— **表现**。一件物品飞出去长什么样：样式、体积、命中配方。
+
+   两张表用 tier 连起来：数值分九档跟着平台礼物走，表现只做五档。档数的上限
+   不是价格带定的，是"观众能不能分辨"定的 —— 单投和重投靠体积(56 vs 78)加
+   顿帧(70 vs 110ms)已经是可分辨的临界，中间再插一档做出来也白做。所以多件
+   平台礼物共用一档表现，扩档只靠质变：有没有实体 → 震不震 → 染不染色 →
+   独不独占屏幕。 */
+const SHOP = {
+  like:    { tier: 0, push: 0.01, name: '点赞' },
+  six:     { tier: 0, push: 0.06, name: '666' },
+  wand:    { tier: 1, push: 1,    name: '仙女棒' },
+  chest:   { tier: 1, push: 10,   name: '技能宝箱' },
+  mirror:  { tier: 2, push: 20,   name: '魔法镜' },
+  battery: { tier: 2, push: 110,  name: '能量电池' },
+  boom:    { tier: 3, push: 230,  name: '爱的爆炸' },
+  mic:     { tier: 3, push: 360,  name: '派对话筒' },
+  drop:    { tier: 4, push: 600,  name: '神秘空投' },
+};
+
+// tier → 该阵营飞出去的是什么。档 4 暂时复用重投的物品（见 exec），等处决演出的美术到位再换
+const ITEM_OF = {
+  L: [null, 'hairpin', 'pillow', 'quilt', 'quilt'],
+  R: [null, 'seed',    'gamepad', 'box',  'box'],
+};
+
+/* 三种样式的差别是节奏与体量，不是物品：
+     volley 连珠  一串小件快速飞来，每颗单独命中 —— 也是常规火力用的那一种
+     single 单投  单件中等速度，看得清是什么东西
+     heavy  重投  先预警再慢慢压过来
    观众不需要认出飞过来的是什么，光看节奏就知道这一发有多重。
 
-   gain 是命中时推的进度。连珠每颗只推一点点，八颗合计还不到一次单投 ——
-   刷得越久推得越多，但单发永远比不过真金白银的礼物。 */
+   push 是这件物品被直接发射时的默认注入量（诊断胶片会用到）；走 SHOP 送礼
+   时以 SHOP 的 push 为准 —— 同一个抱枕，魔法镜刷出来和能量电池刷出来
+   份量差 5.5 倍，但飞起来是同一个东西。 */
 const GIFT = {
   // 查岗党（女方，在左，from=+1）
-  hairpin: { from: +1, style: 'volley', item: 'hairpin', r: 22, n: 8, power: 1, recipe: 'star',    gain: 0.8 },
-  pillow:  { from: +1, style: 'single', item: 'pillow',  r: 56,       power: 2, recipe: 'feather', gain: 7 },
-  quilt:   { from: +1, style: 'heavy',  item: 'quilt',   r: 78,       power: 3, recipe: 'feather', gain: 18 },
+  hairpin: { from: +1, style: 'volley', item: 'hairpin', r: 22, n: 8, power: 1, recipe: 'star',    push: 1 },
+  pillow:  { from: +1, style: 'single', item: 'pillow',  r: 56,       power: 2, recipe: 'feather', push: 20 },
+  quilt:   { from: +1, style: 'heavy',  item: 'quilt',   r: 78,       power: 3, recipe: 'feather', push: 230 },
   // 灭迹党（男方，在右，from=-1）
-  seed:    { from: -1, style: 'volley', item: 'seed',    r: 21, n: 8, power: 1, recipe: 'star',    gain: 0.8 },
-  gamepad: { from: -1, style: 'single', item: 'gamepad', r: 52,       power: 2, recipe: 'debris',  gain: 7 },
-  box:     { from: -1, style: 'heavy',  item: 'box',     r: 74,       power: 3, recipe: 'debris',  gain: 18 },
+  seed:    { from: -1, style: 'volley', item: 'seed',    r: 21, n: 8, power: 1, recipe: 'star',    push: 1 },
+  gamepad: { from: -1, style: 'single', item: 'gamepad', r: 52,       power: 2, recipe: 'debris',  push: 20 },
+  box:     { from: -1, style: 'heavy',  item: 'box',     r: 74,       power: 3, recipe: 'debris',  push: 230 },
 };
 
 function sampleRow(arr, y) {
@@ -573,6 +779,31 @@ function drawHUD(ctx, p) {
   ctx.strokeText('查岗党', 92, 42); ctx.fillText('查岗党', 92, 42);
   ctx.textAlign = 'right';
   ctx.strokeText('灭迹党', 868, 42); ctx.fillText('灭迹党', 868, 42);
+
+  if (S.phase !== 'idle') {
+    /* 火力条 —— 第二个属性必须看得见。观众刷了礼物、手机没动，屏幕上要是
+       没有任何交代，他会认为这游戏是假的。这两条细带就是那个交代：它们一起
+       涨说明双方在对拼（手机自然不动），一条比另一条长出来的那截才是战况。
+       开方是为了让小额也看得出动静 —— 线性的话几百点火力在几千的量程里
+       几乎不动一根头发。 */
+    const bar = (x, w, dir, f, c) => {
+      const k = Math.min(1, Math.sqrt(f / 3000));
+      ctx.fillStyle = 'rgba(8,10,13,.55)'; ctx.fillRect(x, 109, w, 10);
+      const fw = w * k, gx = dir > 0 ? x : x + w - fw;
+      ctx.fillStyle = rgba(c, .86); ctx.fillRect(gx, 109, fw, 10);
+    };
+    bar(92, 276, 1, S.fA, GREEN);
+    bar(572, 296, -1, S.fB, RED);
+
+    const mm = Math.max(0, S.clock);
+    ctx.textAlign = 'center'; ctx.font = 'bold 27px ui-monospace,Menlo,monospace';
+    ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.75)';
+    let tip = `${mm / 60 | 0}:${String(mm % 60 | 0).padStart(2, '0')}`, col = '#fff';
+    if (S.phase === 'sudden') { tip = `绝杀 ${S.sudden.toFixed(0)}`; col = '#ff5a5a'; }
+    else if (S.phase === 'over') { tip = S.winner > 0 ? '查岗党胜' : S.winner < 0 ? '灭迹党胜' : '平局'; col = '#ffd45a'; }
+    else if (S.stand > 0) { tip = `反击 ${S.stand.toFixed(0)}`; col = '#ffd45a'; }
+    ctx.strokeText(tip, 480, 42); ctx.fillStyle = col; ctx.fillText(tip, 480, 42);
+  }
   ctx.restore();
 }
 
@@ -583,15 +814,56 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
   const cvBg = document.getElementById('bg'), cvCh = document.getElementById('ch'), cvFx = document.getElementById('fx');
   const bctx = cvBg.getContext('2d'), cctx = cvCh.getContext('2d'), fctx = cvFx.getContext('2d');
   initTex();
+
+  /* ?sim=1 纯数值快进：不渲染、不发弹幕，只跑 battle，用来核对局长和手感。
+     数值调参不该靠看画面 —— 一局十二分钟，肉眼比对两组参数根本比不出来，
+     而这里两秒钟就能把三个场景各跑一遍。
+       simA/simB  两边每秒注入多少火力（一个爱的爆炸是 230）
+       simT       最多模拟多少秒
+     例：?sim=1&simA=23&simB=11.5  = 优势方每 10 秒一个爱的爆炸、劣势方一半 */
+  const Q0 = new URLSearchParams(location.search);
+  if (Q0.has('sim')) {
+    const injA = +(Q0.get('simA') || 23), injB = +(Q0.get('simB') || 0);
+    const cap = +(Q0.get('simT') || 1800);
+    Ammo.launch = () => {};                     // 纯数值，不要表现层
+    startMatch();
+    const H = 1 / 30;
+    let el = 0, mark50 = -1, mark80 = -1;
+    while (S.phase !== 'over' && el < cap) {
+      S.fA += injA * H; S.fB += injB * H;
+      battle(H); el += H;
+      const lead = Math.abs(S.p - 50);
+      if (mark50 < 0 && lead >= 25) mark50 = el;
+      if (mark80 < 0 && lead >= 40) mark80 = el;
+    }
+    const fmt = (v) => v < 0 ? '—' : `${v / 60 | 0}:${String(v % 60 | 0).padStart(2, '0')}`;
+    document.getElementById('msg').textContent =
+      `注入 ${injA}:${injB}／秒 → 结束于 ${fmt(el)}  p=${S.p.toFixed(1)}  `
+      + `火力 ${S.fA.toFixed(0)}:${S.fB.toFixed(0)}  净差 ${(S.fA - S.fB).toFixed(0)}  `
+      + `过75%档 ${fmt(mark50)}  过90%档 ${fmt(mark80)}  `
+      + `${S.winner > 0 ? '查岗党胜' : S.winner < 0 ? '灭迹党胜' : '平/未分'}`;
+    document.title = 'SIMDONE ' + document.getElementById('msg').textContent;
+    return;
+  }
+
+
   /* 弹幕命中的是对抗线在**它自己那个高度**上的横坐标，不是中点。所以从不同
      高度飞来的弹幕会在不同的行注入冲量 —— 在这之前所有命中都发生在 phoneY
      一个位置上，那条线永远只在同一处抖。 */
   Ammo.init({
     W, frontAt,
+    /* 命中只负责演出，**不改进度**。进度是双方火力净差积分出来的（见 battle）——
+       让命中再推一次，等于同一份伤害算两遍，而且会把"两边都在刷时手机不动"
+       这条最要紧的手感破坏掉。弹幕是火力的表现形式，不是伤害的来源。 */
     onHit(p) {
-      S.p = clamp(S.p + p.from * p.g.gain, 0, 100);
-      document.getElementById('pv').value = S.p;
-      impact(-p.from, p.y, p.g.power, RECIPE[p.g.recipe]);
+      impact(-p.from, p.y, p.exec ? 4 : p.g.power, RECIPE[p.g.recipe]);
+    },
+    /* 对冲掉的那些在中线互相撞掉：粒子照爆，但不推角色、不染色、不顿帧。
+       它要回答的问题只有一个 —— "我刷了礼物怎么手机没动"。答案就在画面上：
+       你的东西被对面在半空撞掉了。 */
+    onClash(p, x) {
+      RECIPE[p.g.recipe].burst(x, p.y, p.from, 0.42);
+      Particles.addShake(0.6);
     },
   });
 
@@ -609,6 +881,31 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     `${frames.filter(Boolean).length}/101 档 · 每 1%`;
 
   const Q = new URLSearchParams(location.search);
+
+  /* ?live=1&liveA=&liveB=&livet= 真实对局截图模式。
+     数值可以用 ?sim 验，但"火力条好不好读""对撞看不看得出来""处决够不够狠"
+     只能看画面。快进到指定秒数再渲染，就能截到任意战况下的那一帧。 */
+  let liveA = 0, liveB = 0, live = false, freeze = false, stopAll = false;
+  if (Q.has('live')) {
+    live = true;
+    liveA = +(Q.get('liveA') || 23); liveB = +(Q.get('liveB') || 11.5);
+    startMatch();
+    const warm = clamp(+(Q.get('livet') || 0), 0, 600);
+    // liveGift 在预热的最后一刻送一件礼物出去 —— 顿帧、独占、处决这些只在
+    // 落地后的零点几秒里存在，不指定时刻的话截不到
+    const gk = Q.get('liveGift'), gAt = clamp(+(Q.get('liveAt') || warm), 0, 600);
+    for (let k = 0; k < warm * 30; k++) {
+      S.fA += liveA / 30; S.fB += liveB / 30;
+      if (gk && k === Math.floor(gAt * 30)) giveGift(+(Q.get('liveSide') || 1), gk);
+      battle(1 / 30); Ammo.update(1 / 30); Particles.update(1 / 30); S.t += 1 / 30; derive(1 / 30);
+    }
+    // 预热完冻住**进度**：战况定在这一刻，而火力、弹幕、粒子照跑 —— 截图要的
+    // 是"打到这个比分时画面是活的什么样"，不是一张静止的死图
+    if (Q.get('liveFreeze') === '1') freeze = true;
+    // liveStop 把整个世界停在预热结束那一帧：要看清"处决落地的瞬间"只能这样，
+    // 它只存在零点几秒，主循环再跑一下就过去了
+    if (Q.get('liveStop') === '1') { stopAll = true; live = false; }
+  }
   if (Q.has('p')) { S.p = clamp(+Q.get('p'), 0, 100); S.auto = false; }
   if (Q.get('auto') === '0') S.auto = false;
   if (Q.has('line')) S.line = clamp(+Q.get('line') | 0, 0, 3);
@@ -881,20 +1178,28 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     if (bOff === 'ammo' || bOff === 'both') Ammo.draw = () => {};
     if (bOff === 'part' || bOff === 'both') Particles.draw = () => {};
 
-    const gnames = Object.keys(GIFT);
+    /* 压测必须走真实链路：礼物注入火力 → 火力自动派弹幕 → 一部分在中线对撞。
+       直接 Ammo.launch 测出来的是旧模型的密度，而新模型场上还多着常规火力那
+       一路，负载完全是另一回事。 */
+    /* 礼物组合要贴近真实分布：小额是绝大多数，神秘空投八件里才有一件。
+       四种等概率轮流的话，每 1.2 秒就来一次处决，那不是压测是造假 —— 独占窗口
+       会一直开着，常规火力全被挡掉，量出来的负载比真实情况低一个数量级。 */
+    const gnames = ['wand', 'wand', 'mirror', 'wand', 'boom', 'wand', 'mirror', 'drop'];
     const T = { logic: 0, bg: 0, ch: 0, fx: 0, all: 0 };
     const each = new Float64Array(N);
     const M = { logic: 0, bg: 0, ch: 0, fx: 0, all: 0, at: 0 };
     let bi = 0, bacc = 0, gi = 0, maxP = 0, maxA = 0, sumP = 0, sumA = 0, drops = 0, froze = 0;
-    S.auto = false; S.p = 50; S.t = 3.0;
+    S.t = 3.0;
     document.getElementById('auto').checked = false;
+    startMatch();
     for (let k = 0; k < 150; k++) derive(1 / 60);
 
     const benchStep = () => {
       const dt = 1 / 60;
       const t0 = performance.now();
       bacc += dt;
-      if (bacc >= RATE) { bacc -= RATE; Ammo.launch(GIFT[gnames[gi++ % gnames.length]]); }
+      if (bacc >= RATE) { bacc -= RATE; giveGift(gi % 2 ? +1 : -1, gnames[gi++ % gnames.length]); }
+      battle(dt);
       const d = Particles.tick(dt);
       /* 冻结帧占比 —— 帧率正常但画面不动，观众读到的同样是"卡"。每次命中
          都冻 35~110ms，而连点时命中是密集的，顿帧会一段一段接上。这个数
@@ -964,6 +1269,7 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
 
   let last = performance.now(), fps = 0, fr = 0, acc = 0, dir = 1;
   function frame(now) {
+    if (stopAll) { render(); requestAnimationFrame(frame); return; }
     const raw = Math.min(.05, (now - last) / 1000); last = now;
     fr++; acc += raw;
     if (acc >= .5) { fps = fr / acc; fr = 0; acc = 0; }
@@ -981,24 +1287,38 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     Bubble.update(dt, FX.struggle);
     S.t += dt;
 
-    if (S.auto) {
+    /* 对局跑数值，调试台跑演示。两者互斥：idle 下 battle 不动，进度由滑块或
+       自动演示给；play 下滑块失效，进度只能由火力差推出来。混在一起的话
+       "礼物到底推了多少"永远说不清。 */
+    if (live) { S.fA += liveA * raw; S.fB += liveB * raw; }
+    const keep = S.p; battle(dt); if (freeze) S.p = keep;
+    if (S.auto && S.phase === 'idle') {
       S.p += dir * dt * 9 * (0.35 + Math.abs(Math.sin(S.t * .27)) * 1.5);
       if (S.p > 97) { S.p = 97; dir = -1; } if (S.p < 3) { S.p = 3; dir = 1; }
-      document.getElementById('pv').value = S.p;
     }
+    if (S.phase !== 'idle') document.getElementById('pv').value = S.p;
+    else if (S.auto) document.getElementById('pv').value = S.p;
     derive(dt);
     render();
+    const mm = Math.max(0, S.clock);
     document.getElementById('stat').textContent =
-      `p=${S.p.toFixed(1)}  对抗线x=${phonePos()[0].toFixed(0)}  f${String(seq.shown).padStart(3, '0')}  `
+      (S.phase === 'idle'
+        ? `p=${S.p.toFixed(1)}  对抗线x=${phonePos()[0].toFixed(0)}  f${String(seq.shown).padStart(3, '0')}  `
+        : `p=${S.p.toFixed(1)}  火力 ${S.fA.toFixed(0)}:${S.fB.toFixed(0)}  净差${(S.fA - S.fB).toFixed(0)}  `
+          + `${(mm / 60 | 0)}:${String(mm % 60 | 0).padStart(2, '0')}`
+          + (S.phase === 'sudden' ? `  绝杀${S.sudden.toFixed(0)}` : '')
+          + (S.stand > 0 ? `  反击${S.stand.toFixed(0)}` : '')
+          + (S.phase === 'over' ? `  ${S.winner > 0 ? '查岗党胜' : S.winner < 0 ? '灭迹党胜' : '平局'}` : '') + '  ')
       + `粒子${Particles.count()}  ${fps.toFixed(0)}fps`;
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 
   const pv = document.getElementById('pv');
-  pv.oninput = () => { S.p = +pv.value; S.auto = false; document.getElementById('auto').checked = false; };
+  pv.oninput = () => { if (S.phase !== 'idle') return; S.p = +pv.value; S.auto = false; document.getElementById('auto').checked = false; };
   document.getElementById('auto').onchange = e => S.auto = e.target.checked;
-  const nudge = d => { S.auto = false; document.getElementById('auto').checked = false;
+  const nudge = d => { if (S.phase !== 'idle') return;
+                       S.auto = false; document.getElementById('auto').checked = false;
                        S.p = clamp(S.p + d, 0, 100); pv.value = S.p; };
   /* 按钮既推进度也打一下：进度是玩法，命中是演出，观众看到的是同一件事。
      side 取推力的反方向 —— 查岗党加分等于灭迹党挨了一下。 */
@@ -1012,12 +1332,18 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
   // 三个配方都由查岗党打出去，落在灭迹党身上；力度由上面那个下拉决定
   /* 礼物按钮只负责发射，进度和特效都等弹幕真的撞上对抗线才结算 —— 玩法和
      演出走的是同一个事件，观众看到的因果关系才对得上。 */
-  for (const b of document.querySelectorAll('[data-gift]')) {
+  /* 礼物按钮注入火力，而不是直接发弹幕。发不发、发几颗由火力的消耗量决定
+     （见 emitFire）—— 于是"刷得越多扔得越密"是从数值里长出来的，不是写死的。 */
+  for (const b of document.querySelectorAll('[data-shop]')) {
     b.onclick = () => {
-      S.auto = false; document.getElementById('auto').checked = false;
-      Ammo.launch(GIFT[b.dataset.gift]);
+      if (S.phase === 'idle') startMatch();
+      giveGift(+b.dataset.side, b.dataset.shop);
     };
   }
+  document.getElementById('start').onclick = () => {
+    if (S.phase === 'idle') { startMatch(); document.getElementById('start').textContent = '回到调试台'; }
+    else { S.phase = 'idle'; S.fA = S.fB = 0; Ammo.clear(); document.getElementById('start').textContent = '开始对局'; }
+  };
   const lv = document.getElementById('lv');
   lv.value = S.line;
   lv.onchange = () => S.line = +lv.value;

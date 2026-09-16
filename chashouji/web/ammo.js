@@ -20,9 +20,16 @@ const Ammo = (function () {
   const act = [], pool = [];
   const queue = [];          // 待发射：连珠的后续几颗、重投的预警期
   const warns = [];          // 预警箭头
-  let frontAt = null, onHit = null, W = 960;
+  let frontAt = null, onHit = null, onClash = null, W = 960;
 
-  function init(o) { frontAt = o.frontAt; onHit = o.onHit; W = o.W || 960; }
+  function init(o) { frontAt = o.frontAt; onHit = o.onHit; onClash = o.onClash || (() => {}); W = o.W || 960; }
+
+  /* 独占窗口。档 4 落地后的这一段时间里，别的东西不许出现在屏幕上 ——
+     这是最强的一种表现手段，而且不需要任何新的粒子技术：观众看到的是
+     "全世界让开，只有这一下"。礼物级的排队补发，常规火力直接丢掉
+     （它只是火力的表现，数值那边早就算过了，少画几发不影响战况）。 */
+  let lock = 0;
+  const pending = [];
 
   /* ---------- 物品画法 ---------- */
 
@@ -188,8 +195,32 @@ const Ammo = (function () {
 
   /* g 是 main.js 的 GIFT 表里的一行。fixedY 只给诊断胶片用 —— 随机高度会让
      每次截出来的图不一样，没法比。 */
-  function launch(g, fixedY) {
+  function launch(g, fixedY, opt) {
+    const o = opt || {};
+    if (lock > 0 && !o.exec) {
+      if (o.gift && pending.length < 6) pending.push([g, fixedY, o]);
+      return;
+    }
     const y0 = fixedY != null ? fixedY : 380 + Math.random() * 520;
+    if (o.exec) {
+      /* 处决：预警拉长到半秒多，让全场先看见它要来；体积按 1.8 倍压过来。
+         这是"倾倒式"演出的简化实现 —— 等美术到位再换成真正的倾泻，
+         飞行逻辑一行都不用改。 */
+      warns.push({ from: g.from, y: y0, t: 0.55, max: 0.55 });
+      queue.push({ t: 0.55, g, y: y0, exec: true });
+      return;
+    }
+    /* 常规火力：一发就是一发，不走连珠那一串。
+       高度要避开两个人的脸（520~610）—— 火力弹幕是连绵不断的，糊在脸上的话
+       整局都看不清表情，而表情是这个玩法仅有的两个可读信息之一。礼物弹幕是
+       孤立事件，遮一下无妨；常态的那一路不行。 */
+    if (o.one) {
+      const yy = fixedY != null ? fixedY : (Math.random() < 0.45
+        ? 366 + Math.random() * 140          // 脸以上：沙发靠背那一带
+        : 636 + Math.random() * 300);        // 脸以下：手和腿那一带
+      queue.push({ t: 0, g, y: clampY(yy), clash: o.clash });
+      return;
+    }
     if (g.style === 'volley') {
       // 连珠：排成一串，间隔 70ms。每一颗单独判定、单独触发一次小命中，
       // 读起来是"哒哒哒"一串轻击而不是一下
@@ -240,11 +271,18 @@ const Ammo = (function () {
     if (act.length >= MAX) pool.push(act.shift());
     const g = q.g, sp = SPEED[g.style] || 900;
     const p = pool.pop() || {};
-    p.g = g; p.item = g.item; p.r = g.r; p.y = q.y;
+    p.g = g; p.item = g.item; p.r = q.exec ? g.r * 1.8 : g.r; p.y = q.y;
     p.from = g.from;
+    p.exec = !!q.exec;
+    p.clash = !!q.clash;
+    // 对撞点落在自己这一侧一点，错开一些 —— 全撞在同一条线上会读成一堵墙
+    p.clashOff = 20 + Math.random() * 90;
     p.x = g.from > 0 ? -g.r - 40 : W + g.r + 40;
     p.vx = g.from * sp * (1 + (Math.random() - 0.5) * 2 * (JIT[g.style] || 0.2));
     p.ax = ACC[g.style] || 0;
+    /* 处决压过来的速度只有一半。它买的是"一段没人打断的时间"—— 嗖一下飞过去
+       就把这段时间还回去了。慢，才有"全场都看着它过来"。 */
+    if (p.exec) { p.vx *= 0.5; p.ax *= 0.35; p.vrot *= 0.5; }
     p.rot = Math.random() * 6.283;
     // 转速跟着体量走，小东西翻得快。方向也随机，一批里有顺时针有逆时针
     p.vrot = (Math.random() - 0.5) * (g.style === 'volley' ? 26 : g.style === 'single' ? 13 : 4.5);
@@ -262,6 +300,10 @@ const Ammo = (function () {
   /* ---------- 推进 ---------- */
 
   function update(dt) {
+    if (lock > 0 && (lock -= dt) <= 0) {
+      lock = 0;
+      while (pending.length) { const [g, y, o] = pending.shift(); launch(g, y, o); }
+    }
     for (let i = queue.length - 1; i >= 0; i--) {
       const q = queue[i];
       q.t -= dt;
@@ -288,9 +330,22 @@ const Ammo = (function () {
          知道这一发要到了，而这正是弹幕能制造期待的唯一窗口。 */
       const span = fx - p.x0;
       p.near = span === 0 ? 1 : clamp01((p.x - p.x0) / span);
+      if (p.clash) {
+        // 对冲掉的那些飞不到人身上，在中线前撞掉
+        const cx = fx - p.from * p.clashOff;
+        if (p.from > 0 ? p.x >= cx : p.x <= cx) {
+          act.splice(i, 1); pool.push(p);
+          onClash(p, cx);
+          continue;
+        }
+      }
       const hit = p.from > 0 ? p.x >= fx : p.x <= fx;
       if (hit) {
         act.splice(i, 1); pool.push(p);
+        /* 独占窗口从**命中那一刻**才开始。原来写在 launch 里，可处决要飞一秒半
+           才落地 —— 等它真砸上的时候窗口早过期了，而飞行途中反倒把常规火力全
+           丢光，画面空成一片。"全世界停下来看这一击"说的是这一击落地之后。 */
+        if (p.exec) lock = 0.8;
         onHit(p, fx);
       } else if (p.x < -400 || p.x > W + 400) {
         // 对抗线被推到极端位置时弹幕可能追不上，别让它永远飞下去
@@ -418,7 +473,7 @@ const Ammo = (function () {
 
   function clear() {
     while (act.length) pool.push(act.pop());
-    queue.length = 0; warns.length = 0;
+    queue.length = 0; warns.length = 0; pending.length = 0; lock = 0;
   }
 
   return { init, launch, update, draw, clear, ITEM, count: () => act.length + queue.length };
