@@ -50,22 +50,32 @@ const GREEN = [126, 217, 87], RED = [255, 72, 72];
 **`GIFT` —— 礼物表**（加/改礼物只动这张）：
 
 ```js
-hairpin: { from:+1, style:'volley', item:'hairpin', r:22, n:8, power:1, recipe:'star',    gain:0.8 }
-pillow:  { from:+1, style:'single', item:'pillow',  r:56,      power:2, recipe:'feather', gain:7 }
-quilt:   { from:+1, style:'heavy',  item:'quilt',   r:78,      power:3, recipe:'feather', gain:18 }
-seed:    { from:-1, style:'volley', item:'seed',    r:21, n:8, power:1, recipe:'star',    gain:0.8 }
-gamepad: { from:-1, style:'single', item:'gamepad', r:52,      power:2, recipe:'debris',  gain:7 }
-box:     { from:-1, style:'heavy',  item:'box',     r:74,      power:3, recipe:'debris',  gain:18 }
+hairpin: { from:+1, style:'volley', item:'hairpin', r:22, n:8, power:1, recipe:'star',    push:1   }
+pillow:  { from:+1, style:'single', item:'pillow',  r:56,      power:2, recipe:'feather', push:20  }
+bouquet: { from:+1, style:'heavy',  item:'bouquet', r:76,      power:3, recipe:'petal',   push:230 }
+ringbox: { from:+1, style:'heavy',  item:'ringbox', r:64,      power:4, recipe:'bloom',   push:600 }
+seed:    { from:-1, style:'volley', item:'seed',    r:21, n:8, power:1, recipe:'star',    push:1   }
+gamepad: { from:-1, style:'single', item:'gamepad', r:52,      power:2, recipe:'debris',  push:20  }
+milktea: { from:-1, style:'heavy',  item:'milktea', r:72,      power:3, recipe:'splash',  push:230 }
+photo:   { from:-1, style:'heavy',  item:'photo',   r:68,      power:4, recipe:'memory',  push:600 }
 ```
 
 `from`：+1 查岗党（左）/ -1 灭迹党（右）。三种 `style` 的速度在 `ammo.js` 的
-`SPEED = { volley:1400, single:900, heavy:850 }`。
+`SPEED = { volley:1400, single:900, heavy:850 }`。档 4 另外由 `exec` 把 `r` 乘 1.8、
+速度减半——它买的是一段没人打断的时间，飞快就把这段时间还回去了。
 
-**`RECIPE` —— 特效配方表**：`thud` / `feather` / `star` / `debris` 四种，
-礼物只引用配方名，不各写各的。
+`quilt` / `box`（棉被、外卖箱）留在 `ammo.js` 的 `ITEM`/`SILH` 里作**备选池**，
+当前未启用；换回档 3 只需改 `ITEM_OF` 一行。弃用原因：两件剪影只差 1.03 倍。
+
+**`RECIPE` —— 特效配方表**：`thud` / `feather` / `star` / `debris` /
+`petal` / `splash` / `bloom` / `memory` 八种，礼物只引用配方名，不各写各的。
+
+**同档两件的剪影长宽比至少要差 1.4 倍。** 飞在半空观众只看得到纯色剪影（`SILH` 层），
+形状太像就会出现"屏幕上在对撞，但我不知道谁占上风"。挑物品时先算这个比值。
 
 加一件新礼物要动的全部地方：`GIFT` 一行 + `ammo.js` 的 `ITEM`/`SILH`/`AURA`/`TAIL`
 各一行 + `index.html` 一个按钮。**引擎本体一行都不该改。**
+换某一档飞什么东西：只改 `main.js` 的 `ITEM_OF` 一行，数值表 `SHOP` 一个字都不用动。
 
 ## 状态与派生：渲染只读不写
 
@@ -150,8 +160,10 @@ S.p += (FA - FB) / 1000 * NUM.DPS * dt;   // 只有净差才动手机
   护盾吃火力 → `min` 变小 → 对冲变弱 → 优势方火力不再被烧 → 差值反而扩大。
 - **净差要有上限**（`NUM.MAXDPS`）。极端投入下净差能到四万，十四秒推完全程。
 
-礼物是**两张表**：`SHOP`（九件平台礼物，管数值）× `GIFT`（六件物品，管表现），
+礼物是**两张表**：`SHOP`（九件平台礼物，管数值）× `GIFT`（八件物品，管表现），
 用 `tier` 和 `ITEM_OF` 连接。加礼物改 `SHOP` 一行。
+物品方案是**档 1~2 客厅现场 + 档 3~4 甜蜜反击**（发卡瓜子/抱枕手柄 → 玫瑰奶茶 →
+戒指盒相框），依据与备选池见 `docs/礼物设计.md`。
 
 ## 新增诊断参数
 
