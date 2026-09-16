@@ -486,6 +486,202 @@ const RECIPE = {
       }
     },
   },
+
+  /* 玫瑰花束炸开（档 3 左）。结构照抄 feather —— 枕头和花束在物理上是同一
+     件事：一团轻的东西散开、长时间滞空。差别只在颜色和形状。
+     这也是为什么它值得换掉棉被：白羽毛在这张浅色底图上本来就偏淡，全靠
+     数量才看得见；深玫红的花瓣自带对比，同样的数量亮一倍。 */
+  petal: {
+    tint: [255, 214, 226],
+    burst(x, y, side, s) {
+      Particles.spawn({ kind: 'dot', x, y, r: 20 * s, r1: 78 * s, life: 0.22,
+                        rgb: [255, 138, 172], a: 0.55 });
+      Particles.spawn({ kind: 'ring', x, y, r: 10 * s, r1: 128 * s, life: 0.34,
+                        rgb: [255, 96, 140], lw: 5 * s });
+      // 花瓣：sway 让它们打着旋往下飘，重力只有碎片的十分之一
+      for (let i = 0; i < Math.round(32 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.9;
+        const sp = (210 + Math.random() * 580) * s;
+        const deep = i % 3 === 0;
+        Particles.spawn({ kind: 'chip', x: x + (Math.random() - 0.5) * 60, y: y + (Math.random() - 0.5) * 80,
+                          vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 180,
+                          g: 140, drag: 0.987, sway: 44 + Math.random() * 60,
+                          life: 1.4 + Math.random() * 1.4,
+                          // 长宽比压到 1:0.7 左右。第一版是 1:0.45，翻滚时被 cos
+                          // 压扁，一屏读成几十根粉色胶囊而不是花瓣
+                          w: 19 + Math.random() * 14 * s, h: 15 + Math.random() * 10 * s,
+                          rot: Math.random() * 6.28, vrot: (Math.random() - 0.5) * 3.2,
+                          rgb: deep ? [198, 40, 78] : [255, 92, 130], edge: [122, 30, 58],
+                          lw: 1.8, a: 1 });
+      }
+      // 一点金粉。花束里那层包装纸的反光，也把粉色压不住的地方提亮
+      for (let i = 0; i < Math.round(12 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.6;
+        const sp = (240 + Math.random() * 460) * s;
+        Particles.spawn({ kind: 'spark', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 150,
+                          g: 820, drag: 0.983, life: 0.22 + Math.random() * 0.26,
+                          rgb: [255, 216, 132], lw: 1.4 + Math.random() * 2 * s });
+      }
+    },
+  },
+
+  /* 奶茶泼一身（档 3 右）。和花瓣正好相反：液体是**重**的，落地就停，
+     所以走 debris 的物理参数而不是 feather 的 —— 一杯奶茶泼出去要是像羽毛
+     那样飘半秒，读起来就成了雾。 */
+  splash: {
+    tint: [246, 226, 198],
+    burst(x, y, side, s) {
+      Particles.spawn({ kind: 'dot', x, y, r: 18 * s, r1: 86 * s, life: 0.18,
+                        rgb: [236, 202, 158], a: 0.8 });
+      Particles.spawn({ kind: 'ring', x, y, r: 12 * s, r1: 142 * s, life: 0.30,
+                        rgb: [214, 158, 96], lw: 6 * s });
+      /* 奶茶渍：**糊住不动**。drag 给到 0.86，冲出去三分之一秒就停在原地，
+         然后一直挂在被泼的那个人身上 —— 这是这个配方唯一在做的事。
+         颜色必须是饱和焦糖不能是淡奶油色：底图是浅绿墙加米色地板，淡色的浆
+         泼上去等于没泼。第一版就是栽在这儿，整个配方几乎是隐形的。 */
+      for (let i = 0; i < Math.round(15 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.4;
+        Particles.spawn({ kind: 'soft', x, y, vx: -side * Math.cos(a) * (110 + Math.random() * 330) * s,
+                          vy: Math.sin(a) * (80 + Math.random() * 230) * s - 110,
+                          g: 180, drag: 0.86, r: 14 * s, r1: (36 + Math.random() * 30) * s,
+                          life: 1.2 + Math.random() * 0.8, rgb: [176, 120, 64], a: 0.5 });
+      }
+      /* 珍珠：深褐、够大、弹得开。它们是全套里对比最强的一组 —— 深色在浅底
+         上本来就跳，所以奶茶的可见度主要靠它们扛，浆只负责"湿了一片"。
+         尺寸从 7 提到 13 起步：小于十几像素在观众端缩一半就成了灰点。 */
+      for (let i = 0; i < Math.round(20 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.7;
+        const sp = (240 + Math.random() * 520) * s;
+        const d = 13 + Math.random() * 9 * s;
+        Particles.spawn({ kind: 'chip', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 300,
+                          g: 1180, drag: 0.992, sway: 12 + Math.random() * 20,
+                          life: 1.1 + Math.random() * 0.8,
+                          w: d, h: d,
+                          rot: Math.random() * 6.28, vrot: (Math.random() - 0.5) * 18,
+                          rgb: i % 4 ? [52, 34, 22] : [96, 62, 38], edge: INK, lw: 1.8, a: 1 });
+      }
+      // 糖浆丝
+      for (let i = 0; i < Math.round(14 * s); i++) {
+        const a = (Math.random() - 0.5) * 2.1;
+        const sp = (300 + Math.random() * 620) * s;
+        Particles.spawn({ kind: 'spark', x, y, vx: -side * Math.cos(a) * sp, vy: Math.sin(a) * sp - 160,
+                          g: 960, drag: 0.985, life: 0.16 + Math.random() * 0.24,
+                          rgb: i % 3 ? [232, 190, 128] : [255, 240, 208],
+                          lw: 1.5 + Math.random() * 2.2 * s });
+      }
+    },
+  },
+
+  /* 求婚戒指盒绽放（档 4 左）。**绽放式**：不朝被打的一侧溅，而是从命中点
+     向四周全向炸开 —— 这是它跟前面所有配方唯一的结构差别，也是"绽放"和
+     "溅射"的分界。独占那 0.8 秒里画面重心必须在被砸的那个人身上，全向才
+     能把他整个圈住。
+     爱心给负重力：往上飘。这是全套里唯一一个不往下掉的配方。 */
+  bloom: {
+    tint: [255, 232, 214],
+    burst(x, y, side, s) {
+      Particles.spawn({ kind: 'dot', x, y, r: 30 * s, r1: 150 * s, life: 0.30,
+                        rgb: [255, 226, 150], a: 0.95 });
+      Particles.spawn({ kind: 'ring', x, y, r: 14 * s, r1: 210 * s, life: 0.40,
+                        rgb: [255, 206, 92], lw: 8 * s });
+      // 三道环依次荡开，"绽"的那一下就是它
+      setTimeout(() => Particles.spawn({ kind: 'ring', x, y, r: 10 * s, r1: 300 * s,
+                        life: 0.50, rgb: [255, 170, 88], lw: 5 * s }), 80);
+      setTimeout(() => Particles.spawn({ kind: 'ring', x, y, r: 8 * s, r1: 380 * s,
+                        life: 0.58, rgb: [255, 140, 170], lw: 3.5 * s }), 180);
+      /* 爱心：先向外冲开一圈（高初速 + 大阻力，0.2 秒内就减速停住），再靠
+         负重力慢慢飘起来。两段连起来读就是"绽开、然后升上去"。 */
+      for (let i = 0; i < Math.round(11 * s); i++) {
+        const a = Math.random() * 6.283;
+        const sp = (300 + Math.random() * 420) * s;
+        /* 半径拿 s 放大之后很容易失控：第一版 (15+16)*2.8 得到 42~87 的半径，
+           一颗爱心就有 190px 宽、占屏宽五分之一，四十颗直接把两张脸糊死。
+           档 4 确实该铺满屏，但**脸是这个玩法仅有的两个可读信息之一**，而
+           爱心要在画面上待一秒半到两秒半，不是一闪而过。密度靠数量，不靠
+           单颗更大。 */
+        Particles.spawn({ kind: 'heart', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+                          g: -46, drag: 0.90, sway: 26 + Math.random() * 34,
+                          r: (9 + Math.random() * 9) * s, r1: 4,
+                          life: 1.5 + Math.random() * 1.1,
+                          rot: (Math.random() - 0.5) * 0.7, vrot: (Math.random() - 0.5) * 2.4,
+                          rgb: i % 3 ? [255, 92, 130] : [255, 150, 180],
+                          edge: [150, 34, 70], lw: 2.2, a: 1 });
+      }
+      // 金色星光，绕着命中点公转 —— 借 star 配方那套"眩晕"的读法
+      for (let i = 0; i < Math.round(10 * s); i++) {
+        const a = Math.random() * 6.283;
+        Particles.spawn({ kind: 'star', x, y, vx: Math.cos(a) * (60 + Math.random() * 170),
+                          vy: Math.sin(a) * (60 + Math.random() * 150) - 70,
+                          g: 150, drag: 0.94, spin: 30 + Math.random() * 40,
+                          r: (11 + Math.random() * 12) * s, r1: 3,
+                          life: 0.8 + Math.random() * 0.7,
+                          rot: a, vrot: (Math.random() - 0.5) * 7,
+                          rgb: [255, 214, 74], edge: [140, 84, 20], lw: 2.4, a: 1 });
+      }
+      // 金粉全向铺满
+      for (let i = 0; i < Math.round(26 * s); i++) {
+        const a = Math.random() * 6.283;
+        const sp = (280 + Math.random() * 700) * s;
+        Particles.spawn({ kind: 'spark', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+                          g: 700, drag: 0.982, life: 0.24 + Math.random() * 0.34,
+                          rgb: i % 4 ? [255, 214, 120] : [255, 248, 214],
+                          lw: 1.6 + Math.random() * 2.6 * s });
+      }
+    },
+  },
+
+  /* 合照相框绽放（档 4 右）。同样全向，但落点相反：爱心往上飘，照片往下落。
+     一张张翻着往下掉的照片比爆炸更有分量 —— 它占的是**时间**不是亮度，
+     生命期给到 2.6 秒，独占窗口结束之后它还在飘，这段余韵才是档 4 的味道。 */
+  memory: {
+    tint: [252, 240, 222],
+    burst(x, y, side, s) {
+      Particles.spawn({ kind: 'dot', x, y, r: 28 * s, r1: 146 * s, life: 0.28,
+                        rgb: [255, 236, 200], a: 0.9 });
+      Particles.spawn({ kind: 'ring', x, y, r: 14 * s, r1: 206 * s, life: 0.38,
+                        rgb: [236, 196, 140], lw: 8 * s });
+      setTimeout(() => Particles.spawn({ kind: 'ring', x, y, r: 10 * s, r1: 320 * s,
+                        life: 0.54, rgb: [206, 168, 120], lw: 4 * s }), 120);
+      /* 照片。走 card 而不是 chip —— 理由见 fx.js 里 card 那段：chip 带描边
+         时永远是胶囊，照片必须是矩形。
+         配色回到这张底图的老规矩上：**相纸保持浅色，对比靠那圈粗深边**。
+         中间试过把整张压成复古棕来"让它看得见"，那是绕开规律不是用它 ——
+         看得见了，但不再像照片。
+         初速比第一版降了三成、阻力加大：原来冲得太猛，一秒后全飞出屏幕，
+         留在画面里的反而是空的。慢落的余韵才是档 4 买到的东西。 */
+      for (let i = 0; i < Math.round(20 * s); i++) {
+        const a = Math.random() * 6.283;
+        const sp = (130 + Math.random() * 330) * s;
+        const old = i % 4 === 0;
+        Particles.spawn({ kind: 'card', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 150,
+                          g: 190, drag: 0.976, sway: 62 + Math.random() * 70,
+                          life: 2.0 + Math.random() * 0.8,
+                          w: 30 + Math.random() * 17 * s, h: 24 + Math.random() * 13 * s,
+                          rot: (Math.random() - 0.5) * 1.5, vrot: (Math.random() - 0.5) * 1.1,
+                          rgb: old ? [242, 226, 198] : [252, 247, 238],
+                          edge: [74, 52, 34], lw: 3.6, a: 1 });
+      }
+      // 少量爱心，把这一下和戒指盒认作同一档
+      for (let i = 0; i < Math.round(7 * s); i++) {
+        const a = Math.random() * 6.283;
+        Particles.spawn({ kind: 'heart', x, y, vx: Math.cos(a) * (200 + Math.random() * 300) * s,
+                          vy: Math.sin(a) * (200 + Math.random() * 260) * s,
+                          g: -40, drag: 0.90, sway: 24 + Math.random() * 30,
+                          r: (8 + Math.random() * 8) * s, r1: 3,
+                          life: 1.4 + Math.random() * 1.0,
+                          rot: (Math.random() - 0.5) * 0.6, vrot: (Math.random() - 0.5) * 2.2,
+                          rgb: [255, 122, 152], edge: [150, 48, 82], lw: 2.0, a: 1 });
+      }
+      for (let i = 0; i < Math.round(16 * s); i++) {
+        const a = Math.random() * 6.283;
+        const sp = (240 + Math.random() * 560) * s;
+        Particles.spawn({ kind: 'spark', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+                          g: 760, drag: 0.983, life: 0.2 + Math.random() * 0.3,
+                          rgb: i % 3 ? [255, 226, 168] : [255, 248, 226],
+                          lw: 1.5 + Math.random() * 2.4 * s });
+      }
+    },
+  },
 };
 
 /* 礼物有两张表，因为它是两件事。
@@ -514,10 +710,15 @@ const SHOP = {
   drop:    { tier: 4, push: 600,  name: '神秘空投' },
 };
 
-// tier → 该阵营飞出去的是什么。档 4 暂时复用重投的物品（见 exec），等处决演出的美术到位再换
+/* tier → 该阵营飞出去的是什么。
+
+   物品方案：**档 1~2 客厅现场 + 档 3~4 甜蜜反击**（见 docs/礼物设计.md 第六节）。
+   这不是折中，是两段要的东西本来就不同：档 1~2 一局出现上百次，它的好处恰恰
+   是不够特别；档 3~4 一局只有几次，要的是"我没见过"—— 而这个题材里观众最没
+   见过的，就是吵到最后砸过来的是一束花。 */
 const ITEM_OF = {
-  L: [null, 'hairpin', 'pillow', 'quilt', 'quilt'],
-  R: [null, 'seed',    'gamepad', 'box',  'box'],
+  L: [null, 'hairpin', 'pillow', 'bouquet', 'ringbox'],
+  R: [null, 'seed',    'gamepad', 'milktea', 'photo'],
 };
 
 /* 三种样式的差别是节奏与体量，不是物品：
@@ -533,11 +734,16 @@ const GIFT = {
   // 查岗党（女方，在左，from=+1）
   hairpin: { from: +1, style: 'volley', item: 'hairpin', r: 22, n: 8, power: 1, recipe: 'star',    push: 1 },
   pillow:  { from: +1, style: 'single', item: 'pillow',  r: 56,       power: 2, recipe: 'feather', push: 20 },
-  quilt:   { from: +1, style: 'heavy',  item: 'quilt',   r: 78,       power: 3, recipe: 'feather', push: 230 },
+  bouquet: { from: +1, style: 'heavy',  item: 'bouquet', r: 76,       power: 3, recipe: 'petal',   push: 230 },
+  /* 档 4 的 r 看着不大，是因为 exec 会再乘 1.8（ammo.js）：64→115、68→122，
+     占屏宽的 24% 与 25%。飞行体积负责预告"这一下很重"，兑现在命中那一刻的
+     绽放里 —— 所以本体不必再大，大的是绽开的东西。 */
+  ringbox: { from: +1, style: 'heavy',  item: 'ringbox', r: 64,       power: 4, recipe: 'bloom',   push: 600 },
   // 灭迹党（男方，在右，from=-1）
   seed:    { from: -1, style: 'volley', item: 'seed',    r: 21, n: 8, power: 1, recipe: 'star',    push: 1 },
   gamepad: { from: -1, style: 'single', item: 'gamepad', r: 52,       power: 2, recipe: 'debris',  push: 20 },
-  box:     { from: -1, style: 'heavy',  item: 'box',     r: 74,       power: 3, recipe: 'debris',  push: 230 },
+  milktea: { from: -1, style: 'heavy',  item: 'milktea', r: 72,       power: 3, recipe: 'splash',  push: 230 },
+  photo:   { from: -1, style: 'heavy',  item: 'photo',   r: 68,       power: 4, recipe: 'memory',  push: 600 },
 };
 
 function sampleRow(arr, y) {

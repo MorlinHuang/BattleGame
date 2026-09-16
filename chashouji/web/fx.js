@@ -81,7 +81,7 @@ const Particles = (function () {
        star  五角星，会旋转、会缩小
        soft  绒絮，普通混合，用作灰尘与绒毛
 
-     chip 和 star 都吃 edge（描边色）。底图是明亮客厅，实体碎片不描边就糊
+     chip、star 和 heart 都吃 edge（描边色）。底图是明亮客厅，实体不描边就糊
      在浅绿墙和米色地板里 —— 这跟角色睡衣有线稿是同一个道理，赛璐璐风格
      里"看得见"靠的是轮廓不是亮度。发光那三种（dot/spark/ring）没有描边，
      它们本来就该是光。 */
@@ -148,6 +148,18 @@ const Particles = (function () {
   }
 
   /* 五角星路径。半径 r，内凹到 0.42 —— 再瘦就变成海星，再胖就读成花。 */
+  /* 爱心。用两段三次贝塞尔拼出来，比心形参数方程便宜得多，形状也更"图标"
+     一点 —— 这里要的是观众一眼认出的那个符号，不是数学上正确的心脏线。
+     顶点在 -r*0.62 而不是 -r，因为爱心的视觉重心明显偏下，按外接盒居中的话
+     一堆爱心飘起来会整体显得往上飘了半个身位。 */
+  function heartPath(ctx, r) {
+    ctx.beginPath();
+    ctx.moveTo(0, r * 0.92);
+    ctx.bezierCurveTo(-r * 1.08, r * 0.10, -r * 0.62, -r * 1.02, 0, -r * 0.34);
+    ctx.bezierCurveTo(r * 0.62, -r * 1.02, r * 1.08, r * 0.10, 0, r * 0.92);
+    ctx.closePath();
+  }
+
   function starPath(ctx, r) {
     ctx.beginPath();
     for (let i = 0; i < 10; i++) {
@@ -164,7 +176,7 @@ const Particles = (function () {
     ctx.lineJoin = 'round';
     for (let i = 0; i < act.length; i++) {
       const p = act[i];
-      if (p.kind !== 'soft' && p.kind !== 'chip' && p.kind !== 'star') continue;
+      if (p.kind !== 'soft' && p.kind !== 'chip' && p.kind !== 'star' && p.kind !== 'heart' && p.kind !== 'card') continue;
       const k = p.life / p.maxLife;
       const alpha = p.a * fade(p);
       if (alpha <= 0.01) continue;
@@ -172,18 +184,40 @@ const Particles = (function () {
       if (p.kind === 'soft') {
         const r = p.r + (p.r1 - p.r) * (1 - k);
         ctx.drawImage(p.tex, p.x - r, p.y - r, r * 2, r * 2);
-      } else if (p.kind === 'star') {
+      } else if (p.kind === 'star' || p.kind === 'heart') {
         const r = p.r + (p.r1 - p.r) * (1 - k);
         const ph = p.seed + (1 - k) * 7.4;
         ctx.save();
         ctx.translate(p.x + (p.spin ? Math.cos(ph) * p.spin : 0),
                       p.y + (p.spin ? Math.sin(ph) * p.spin * 0.42 : 0));
         ctx.rotate(p.rot);
-        starPath(ctx, r);
+        (p.kind === 'heart' ? heartPath : starPath)(ctx, r);
         ctx.fillStyle = p.fill;
         ctx.fill();
         if (p.line) { ctx.lineWidth = p.lw; ctx.strokeStyle = p.line; ctx.stroke(); }
         ctx.restore();
+      } else if (p.kind === 'card') {
+        /* 卡片：一张照片。它跟 chip 的区别不是参数而是**语义** —— chip 是
+           "空中翻滚的薄片"，带描边时圆角被拉到半高满值、短边收成半圆，
+           再配合按 cos(rot) 的压扁，无论怎么调参数都只会读成一颗胶囊。
+           而照片必须始终是个有直角的矩形，否则"是不是照片"就没了，那正是
+           这个粒子全部的意义。所以它不压扁、不圆角，只是斜着飘。
+           内芯那一块是相纸中间的画面：没有它就只是一张白纸。 */
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        const hw = p.w / 2, hh2 = p.h / 2;
+        ctx.fillStyle = p.fill;
+        ctx.fillRect(-hw, -hh2, p.w, p.h);
+        if (p.line) {
+          ctx.lineWidth = p.lw; ctx.strokeStyle = p.line;
+          ctx.strokeRect(-hw, -hh2, p.w, p.h);
+          ctx.globalAlpha = alpha * 0.5;
+          ctx.fillStyle = p.line;
+          ctx.fillRect(-hw * 0.74, -hh2 * 0.82, p.w * 0.74, p.h * 0.58);
+        }
+        ctx.restore();
+
       } else {
         ctx.save();
         ctx.translate(p.x, p.y);
@@ -214,7 +248,7 @@ const Particles = (function () {
     ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < act.length; i++) {
       const p = act[i];
-      if (p.kind === 'soft' || p.kind === 'chip' || p.kind === 'star') continue;
+      if (p.kind === 'soft' || p.kind === 'chip' || p.kind === 'star' || p.kind === 'heart' || p.kind === 'card') continue;
       const k = p.life / p.maxLife;
       const alpha = p.a * fade(p);
       if (alpha <= 0.01) continue;

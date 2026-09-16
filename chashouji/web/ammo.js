@@ -81,6 +81,124 @@ const Ammo = (function () {
       ctx.fillStyle = '#ff7a7a'; ctx.fill(); ink(ctx, r * 0.07);
     },
 
+    /* 玫瑰花束（档 3）。剪影必须是**放射状**的 —— 它对面那件是奶茶杯（梯形），
+       两件飞在半空时观众只看得到纯色轮廓，一个发散一个收拢才分得开。
+       这也是它换掉棉被的原因：棉被 1:0.70 和外卖箱 1:0.72 在剪影层上是
+       两个一模一样的大方块。 */
+    bouquet(ctx, r) {
+      // 包装纸：底下那个倒锥
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.30, r * 0.20); ctx.lineTo(r * 0.30, r * 0.20);
+      ctx.lineTo(r * 0.16, r * 0.95); ctx.lineTo(-r * 0.16, r * 0.95);
+      ctx.closePath();
+      ctx.fillStyle = '#f7e3cf'; ctx.fill(); ink(ctx, r * 0.09);
+      // 叶子先铺一层，压在花底下
+      ctx.fillStyle = '#5f8f57';
+      for (const a of [-2.5, -0.65, 3.55, 1.75]) {
+        ctx.save(); ctx.translate(Math.cos(a) * r * 0.62, Math.sin(a) * r * 0.62 - r * 0.18);
+        ctx.rotate(a);
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 0.34, r * 0.13, 0, 0, 6.2832); ctx.fill();
+        ctx.restore();
+      }
+      // 七朵花头按放射排开，这就是那个"发散"的轮廓
+      const heads = [[0, -0.72], [-0.60, -0.42], [0.60, -0.42],
+                     [-0.72, 0.10], [0.72, 0.10], [-0.28, -0.06], [0.30, -0.10]];
+      for (let i = 0; i < heads.length; i++) {
+        const hx = heads[i][0] * r, hy = heads[i][1] * r, hr = r * (i < 3 ? 0.32 : 0.27);
+        ctx.beginPath(); ctx.arc(hx, hy, hr, 0, 6.2832);
+        ctx.fillStyle = i % 3 === 1 ? '#ff5f86' : '#e63a62'; ctx.fill(); ink(ctx, r * 0.075);
+        // 花心那一圈：没有它七个圆读成七颗球
+        ctx.beginPath(); ctx.arc(hx, hy, hr * 0.44, 0, 6.2832);
+        ctx.strokeStyle = 'rgba(255,196,214,.9)'; ctx.lineWidth = r * 0.05; ctx.stroke();
+      }
+    },
+
+    /* 奶茶（档 3）。上宽下窄的杯子 + 一根斜插的吸管，轮廓收拢，跟对面的
+       花束正好相反。珍珠不画在杯里 —— 飞行时那么小根本看不见，它们留到
+       命中时才作为粒子出场。 */
+    milktea(ctx, r) {
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.56, -r * 0.86); ctx.lineTo(r * 0.56, -r * 0.86);
+      ctx.lineTo(r * 0.40, r * 0.96); ctx.lineTo(-r * 0.40, r * 0.96);
+      ctx.closePath();
+      ctx.fillStyle = '#e8c9a0'; ctx.fill(); ink(ctx, r * 0.085);
+      // 杯底那层珍珠：一条深色带子，比画一堆小圆更容易读
+      ctx.save(); ctx.beginPath();
+      ctx.moveTo(-r * 0.46, r * 0.36); ctx.lineTo(r * 0.46, r * 0.36);
+      ctx.lineTo(r * 0.40, r * 0.96); ctx.lineTo(-r * 0.40, r * 0.96);
+      ctx.closePath(); ctx.clip();
+      ctx.fillStyle = '#4a3324'; ctx.fillRect(-r, r * 0.36, r * 2, r);
+      ctx.restore();
+      // 封膜
+      ctx.beginPath(); ctx.roundRect(-r * 0.62, -r * 1.00, r * 1.24, r * 0.22, r * 0.07);
+      ctx.fillStyle = '#fff4e4'; ctx.fill(); ink(ctx, r * 0.075);
+      // 吸管：斜的，它是这件东西的识别点
+      ctx.save(); ctx.translate(r * 0.10, -r * 0.30); ctx.rotate(-0.34);
+      ctx.beginPath(); ctx.roundRect(-r * 0.09, -r * 0.95, r * 0.18, r * 1.5, r * 0.09);
+      ctx.fillStyle = '#ff8fb8'; ctx.fill(); ink(ctx, r * 0.07);
+      ctx.restore();
+    },
+
+    /* 求婚戒指盒（档 4）。开着盖飞过来 —— 合着的盒子只是个方块，跟档 2 的
+       抱枕撞轮廓；掀开的盖子给了它一个别人没有的折角。
+       它买的不是"更大的方块"，是命中那一刻绽开的东西。 */
+    ringbox(ctx, r) {
+      /* 掀开的盖子，向后仰。仰角和位移都要收着给：第一版 -0.42 配 -0.46
+         的位移，盖子跟盒身之间开了一道缝，230px 宽的东西飞过去读成两个
+         分开的粉方块，而不是一个开着的盒子。 */
+      ctx.save(); ctx.translate(0, -r * 0.38); ctx.rotate(-0.30);
+      ctx.beginPath(); ctx.roundRect(-r * 0.78, -r * 0.62, r * 1.56, r * 0.66, r * 0.1);
+      ctx.fillStyle = '#c1416b'; ctx.fill(); ink(ctx, r * 0.075);
+      ctx.beginPath(); ctx.roundRect(-r * 0.64, -r * 0.50, r * 1.28, r * 0.42, r * 0.08);
+      ctx.fillStyle = '#ffe6ef'; ctx.fill();
+      ctx.restore();
+      // 盒身
+      ctx.beginPath(); ctx.roundRect(-r * 0.80, -r * 0.10, r * 1.60, r * 0.86, r * 0.12);
+      ctx.fillStyle = '#d4527d'; ctx.fill(); ink(ctx, r * 0.08);
+      // 绒布槽
+      ctx.beginPath(); ctx.ellipse(0, -r * 0.06, r * 0.50, r * 0.13, 0, 0, 6.2832);
+      ctx.fillStyle = '#8f2d4f'; ctx.fill();
+      /* 戒指：环 + 一颗钻，钻用菱形，圆的会读成又一颗珠子。
+         尺寸比"真实比例"大一圈 —— 它是整件东西的识别点，按真比例画出来
+         在飞行中只是一个小金点，观众读到的就只剩"一个粉盒子"了。 */
+      ctx.beginPath(); ctx.arc(0, -r * 0.16, r * 0.30, 0, 6.2832);
+      ctx.lineWidth = r * 0.13; ctx.strokeStyle = '#ffd35a'; ctx.stroke();
+      ctx.lineWidth = r * 0.035; ctx.strokeStyle = 'rgba(122,82,20,.85)'; ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 0.74); ctx.lineTo(r * 0.25, -r * 0.46);
+      ctx.lineTo(0, -r * 0.20); ctx.lineTo(-r * 0.25, -r * 0.46);
+      ctx.closePath();
+      ctx.fillStyle = '#eaf7ff'; ctx.fill(); ink(ctx, r * 0.07);
+    },
+
+    /* 合照相框（档 4）。竖着的框 + 里面两个挨在一起的小人影。
+       竖长比 1:1.3，跟戒指盒的 1:0.8 差 1.6 倍，剪影分得开。 */
+    photo(ctx, r) {
+      ctx.beginPath(); ctx.roundRect(-r * 0.68, -r * 0.90, r * 1.36, r * 1.80, r * 0.08);
+      ctx.fillStyle = '#b8864f'; ctx.fill(); ink(ctx, r * 0.08);
+      ctx.beginPath(); ctx.rect(-r * 0.52, -r * 0.74, r * 1.04, r * 1.48);
+      ctx.fillStyle = '#fdf6ea'; ctx.fill(); ink(ctx, r * 0.05);
+      // 照片里的两个人：肩线挨着，不画脸 —— 这个尺寸画脸只会糊成两个点
+      ctx.fillStyle = '#7d93b5';
+      for (const d of [-0.22, 0.22]) {
+        ctx.beginPath(); ctx.arc(d * r, r * 0.02, r * 0.17, 0, 6.2832); ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(d * r, r * 0.52, r * 0.28, r * 0.30, 0, 3.1416, 6.2832);
+        ctx.fill();
+      }
+      // 右上角一颗小爱心，把"这是合照"点破
+      ctx.save(); ctx.translate(r * 0.34, -r * 0.46); ctx.scale(r * 0.013, r * 0.013);
+      ctx.beginPath();
+      ctx.moveTo(0, 11); ctx.bezierCurveTo(-13, 1, -7, -12, 0, -4);
+      ctx.bezierCurveTo(7, -12, 13, 1, 0, 11); ctx.closePath();
+      ctx.fillStyle = '#ff5f86'; ctx.fill();
+      ctx.restore();
+    },
+
+    /* ↓ 以下两件是**备选池**，当前未启用（档 3 已换成花束/奶茶）。
+       留着不是死代码：换回来只需改 main.js 的 ITEM_OF 一行。
+       弃用原因见 docs/礼物设计.md 判据二 —— 两件剪影只差 1.03 倍。 */
+
     // 整条被子：最大的一件，格纹让它在翻滚时读得出体积
     quilt(ctx, r) {
       ctx.beginPath(); ctx.roundRect(-r, -r * 0.7, r * 2, r * 1.4, r * 0.18);
@@ -129,6 +247,36 @@ const Ammo = (function () {
     },
     pillow(ctx, r) { ctx.beginPath(); ctx.roundRect(-r, -r * 0.84, r * 2, r * 1.68, r * 0.4); },
     gamepad(ctx, r) { ctx.beginPath(); ctx.roundRect(-r, -r * 0.48, r * 2, r * 0.96, r * 0.44); },
+    // 花束：外接的是七个花头，画成一圈交叠的圆 —— 放射轮廓就是它的识别点
+    bouquet(ctx, r) {
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.30, r * 0.20); ctx.lineTo(r * 0.30, r * 0.20);
+      ctx.lineTo(r * 0.16, r * 0.95); ctx.lineTo(-r * 0.16, r * 0.95);
+      ctx.closePath();
+      for (const h of [[0, -0.72, 0.32], [-0.60, -0.42, 0.32], [0.60, -0.42, 0.32],
+                       [-0.72, 0.10, 0.27], [0.72, 0.10, 0.27],
+                       [-0.28, -0.06, 0.27], [0.30, -0.10, 0.27]]) {
+        ctx.moveTo((h[0] + h[2]) * r, h[1] * r);
+        ctx.arc(h[0] * r, h[1] * r, h[2] * r, 0, 6.2832);
+      }
+    },
+    milktea(ctx, r) {
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.56, -r * 0.86); ctx.lineTo(r * 0.56, -r * 0.86);
+      ctx.lineTo(r * 0.40, r * 0.96); ctx.lineTo(-r * 0.40, r * 0.96);
+      ctx.closePath();
+      ctx.moveTo(-r * 0.62, -r * 1.00);
+      ctx.rect(-r * 0.62, -r * 1.00, r * 1.24, r * 0.22);
+    },
+    ringbox(ctx, r) {
+      ctx.beginPath();
+      ctx.roundRect(-r * 0.80, -r * 0.10, r * 1.60, r * 0.86, r * 0.12);
+      // 掀开的盖子单独补一块，斜的 —— 剪影上那个折角全靠它
+      ctx.save(); ctx.translate(0, -r * 0.46); ctx.rotate(-0.42);
+      ctx.roundRect(-r * 0.78, -r * 0.62, r * 1.56, r * 0.66, r * 0.1);
+      ctx.restore();
+    },
+    photo(ctx, r) { ctx.beginPath(); ctx.roundRect(-r * 0.68, -r * 0.90, r * 1.36, r * 1.80, r * 0.08); },
     quilt(ctx, r) { ctx.beginPath(); ctx.roundRect(-r, -r * 0.7, r * 2, r * 1.4, r * 0.18); },
     box(ctx, r) { ctx.beginPath(); ctx.roundRect(-r, -r * 0.72, r * 2, r * 1.44, r * 0.1); },
   };
@@ -144,6 +292,8 @@ const Ammo = (function () {
   const AURA = {
     hairpin: [255, 64, 156], pillow: [255, 92, 164], quilt: [255, 76, 148],
     seed: [255, 148, 48], gamepad: [64, 206, 255], box: [255, 136, 40],
+    bouquet: [255, 48, 110], ringbox: [255, 186, 56],
+    milktea: [255, 158, 72], photo: [255, 206, 140],
   };
 
   /* 色晕贴图一次性烘好。这台机器没有 GPU，每帧 createRadialGradient 是最贵的
@@ -174,6 +324,8 @@ const Ammo = (function () {
   const TAIL = {
     hairpin: '176,64,112', seed: '58,42,26', pillow: '196,116,150',
     gamepad: '38,46,58', quilt: '198,112,148', box: '126,82,48',
+    bouquet: '150,42,72', milktea: '132,94,58',
+    ringbox: '150,58,92', photo: '120,88,54',
   };
 
   /* ---------- 发射 ---------- */
