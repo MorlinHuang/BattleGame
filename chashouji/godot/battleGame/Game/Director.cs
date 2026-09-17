@@ -14,28 +14,66 @@ public partial class Director : Node2D {
     RulerView ruler;
     HudView hud;
     PanelView panel;
+    BubbleView bubble;
+    AmmoView ammo;
+    ParticleFx fx;
+    /* 会跟着命中一起抖的那几层挂在它下面，只平移这一个节点就够。网页版是给三块
+       canvas 各 translate 一次，这里换成一个父节点 —— 少了"哪一层忘了加偏移"
+       这类漏项。 */
+    Node2D shake;
 
     /* 调试台自动演示的方向。网页版里它是 boot 的局部变量，这里只能是字段 ——
        但它属于"调试台怎么走"，不属于对局状态，所以不进 S。 */
     static int autoDir = 1;
 
+    /* --live=A,B：每秒给双方各注入这么多火力，对应网页版的 ?live=1&liveA=&liveB=。
+       数值可以拿 battle 单独验，但"对撞看不看得出来""火力条好不好读"只能看画面，
+       而这两件事都要求**双方同时有火力** —— 单方送礼时 clashRatio 恒为 0，对冲
+       那条分支一次都跑不到。 */
+    static float liveA, liveB;
+
     public override void _Ready() {
         /* 层序（ZIndex）。背景在最底，角色压着地面辉光，指针在最上面 ——
            它是这个玩法唯一永远不能被挡住的读数。 */
+        bool noSprite = false, noPanel = false;
+        foreach (var a in OS.GetCmdlineUserArgs()) {
+            if (a == "--nopanel") noPanel = true;
+            // 对应网页版 ?nosprite=1：强制退回矢量画法，用来和 3D 转盘并排对比
+            if (a == "--nosprite") noSprite = true;
+            else if (a.StartsWith("--live=")) {
+                var ab = a.Substring(7).Split(',');
+                if (ab.Length == 2) { liveA = ab[0].ToFloat(); liveB = ab[1].ToFloat(); }
+                GD.Print($"[live] 每秒注入 查岗党 {liveA} / 灭迹党 {liveB}");
+            }
+        }
+
         bg     = new BgView();        bg.Setup(this, "bg", false, -100);
         ground = new GroundView(this, -20);
-        frames = new FrameView();     frames.Init(this, 0);
-        front  = new FrontMarkView(); front.Init(this, 20, 60);
-        ruler  = new RulerView(this, 40);
+
+        /* 背景与地面不进震动容器：网页版里 drawGround 也画在 translate 之外 ——
+           地板跟着抖会读成地震，而这一下是打在人身上的。HUD 与调试台更不能抖，
+           它们是读数。 */
+        shake = new Node2D { Name = "shake" };
+        AddChild(shake);
+
+        frames = new FrameView();     frames.Init(shake, 0);
+        front  = new FrontMarkView(); front.Init(shake, 20, 60);
+        ruler  = new RulerView(shake, 40);
+        // 气泡在弹幕之下：它贴在后面那堵墙上，弹幕是前景，飞过时该压过去
+        bubble = new BubbleView();    bubble.Init(shake, 62);
+        /* 弹幕在角色之上、粒子之下：它飞向两个人中间，画在角色底下的话命中前
+           最后那段就被身体挡掉了；而粒子是命中的爆炸，该盖在弹幕上面。 */
+        ammo   = new AmmoView();      ammo.Init(shake, 64, noSprite);
+        fx     = new ParticleFx();    fx.Init(shake, 70, this, 90);
         hud    = new HudView(this, 80);
         panel  = new PanelView(); panel.Init(this, 200);
-        foreach (var a in OS.GetCmdlineUserArgs())
-            if (a == "--nopanel") panel.Showing = false;
+        if (noPanel) panel.Showing = false;
 
         /* 这里**不**调 StartMatch()。网页版一进来停在调试台（phase=idle）：±7 和
            自动演示能直接摆进度，专门用来调特效；点任意礼物或"开始对局"才进 play，
            之后进度只能由火力差推出来。少了 idle 这个状态，"某件礼物到底推了多少"
            就没有干净的对照 —— 手动摆过一次 p，这一局后面所有读数都不能用了。 */
+        if (liveA > 0f || liveB > 0f) StartMatch();   // --live 直接开局，否则 battle 不跑
     }
 
     public static void StartMatch() {
@@ -44,10 +82,29 @@ public partial class Director : Node2D {
         S.clock = NUM.MATCH; S.phase = Phase.Play;
         S.edge = S.big = S.sudden = S.stand = 0f; S.standUsed = false; S.winner = 0;
         S.auto = false;
+        Ammo.Clear(); Particles.Clear();
     }
 
     public override void _Process(double dtd) {
-        float dt = (float)dtd;
+        // 上限 50ms：切回窗口或断点续跑时一帧几秒，弹幕会直接穿过整块画布
+        float raw = Mathf.Min(0.05f, (float)dtd);
+        /* 顿帧冻住的是游戏逻辑（角色姿态、对抗线、进度），特效照真实时间走。
+           两者用的是不同的时钟：定格是为了让观众多看两眼"他被打中了"，而火花
+           和闪光正是这一下的可视化 —— 把它们一起冻住，爆炸就会迟到一百毫秒，
+           读起来是"闪了一下、卡住、然后才炸开"。 */
+        float dt = Particles.Tick(raw);
+        Particles.Update(raw);
+        /* 弹幕走 dt，跟游戏逻辑一起冻。这和粒子走真实时间并不矛盾：爆炸是"刚刚
+           这一下"的可视化，冻住它就迟到了；而正在飞的弹幕是**下一下**的前奏，
+           顿帧的意思就是全世界停下来看这一击，此刻别的东西还在飞就散掉了。 */
+        Ammo.Update(dt);
+        // 气泡跟着逻辑时钟：顿帧时它也该停，那半秒全世界都在看刚才那一击
+        Bubble.Update(dt, FX.struggle);
+
+        // 持续注入走真实时间，不受顿帧影响 —— 它模拟的是观众在刷，观众不会停
+        if (liveA > 0f) S.fA += liveA * raw;
+        if (liveB > 0f) S.fB += liveB * raw;
+
         S.t += dt;
         Battle(dt);
 
@@ -62,11 +119,16 @@ public partial class Director : Node2D {
 
         Derive(dt);
 
+        shake.Position = Particles.Off;
+
         float bias = (S.p - 50f) / 50f;
         ground.Rebuild(bias);
         frames.Rebuild(S.p, FX.actorX, FX.punch, FX.tint, FX.tintA);
         front.Rebuild(bias, S.line);
         ruler.Rebuild();
+        bubble.Rebuild();
+        ammo.Rebuild();
+        fx.Rebuild();
         hud.Rebuild(S.p);
         panel.Rebuild();
     }
@@ -157,7 +219,7 @@ public partial class Director : Node2D {
         S.phase = Phase.Idle;
         S.fA = S.fB = 0f; S.budA = S.budB = 0f;
         S.debA = S.debB = S.debKA = S.debKB = 0f;
-        // Ammo.Clear() 在 ammo 层搬过来之后接上
+        Ammo.Clear();
     }
 
     /* 火力转成弹幕。clash 的那些飞到中线就互相撞掉，只有剩下的才砸到人身上 ——
@@ -166,8 +228,11 @@ public partial class Director : Node2D {
         int n = 0;
         if (side > 0) { while (S.budA >= NUM.SHOT && n < 3) { S.budA -= NUM.SHOT; n++; } }
         else          { while (S.budB >= NUM.SHOT && n < 3) { S.budB -= NUM.SHOT; n++; } }
-        // 弹幕发射在 ammo.js 搬过来之后接上；数值层的消耗与节流已经是完整的
-        _ = clashRatio; _ = n;
+        for (int i = 0; i < n; i++) {
+            var g = Shop.G[side > 0 ? "hairpin" : "seed"];
+            Ammo.Launch(g, float.NaN,
+                        new LaunchOpt { one = true, clash = Particles.Rnd() < clashRatio });
+        }
     }
 
     /// 送一件礼物。数值走火力，表现走弹幕 —— 两件事同一个入口，但不是同一层。
@@ -186,6 +251,15 @@ public partial class Director : Node2D {
             HexDebuff(-side, 0.50f, 8f);
             // 直接削存量是唯一能瞬间改变差值的手段，也是翻盘的唯一来源
             if (side > 0) S.fB *= 0.5f; else S.fA *= 0.5f;
+        }
+
+        if (it.tier >= 1) {
+            var g = Shop.G[(side > 0 ? Shop.ItemL : Shop.ItemR)[it.tier]];
+            Ammo.Launch(g, float.NaN, new LaunchOpt { gift = true, exec = it.tier == 4 });
+        } else {
+            // 免费档不飞实体，只在自己那侧冒一小串火花 —— 它买的是参与感，不是战力
+            RECIPE.Get("star").burst(side > 0 ? 46f : K.W - 46f,
+                                     300f + Particles.Rnd() * 520f, -side, 0.3f);
         }
     }
 

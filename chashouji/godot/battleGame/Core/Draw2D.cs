@@ -25,21 +25,30 @@ public class Draw2D {
     int[] ts = new int[3072];
     int nv, nt;                       // 已用的顶点数 / 索引数
 
+    /* 变换栈。物品画法里到处是"在物品自己的坐标系之上再转一层" —— 花束的叶子、
+       奶茶那根斜吸管、戒指盒掀开的盖子 —— 所以 Push 必须能嵌套，与外层相乘而
+       不是把外层顶掉。栈深 8：实际最深是"弹幕本体 → 物品内部零件"两层。 */
     M2 xf = M2.Id;
-    bool xfOn = false;
+    readonly M2[] stack = new M2[8];
+    int depth = 0;
 
     public int VertCount => nv;
 
-    public void Clear() { nv = 0; nt = 0; xf = M2.Id; xfOn = false; }
+    public void Clear() { nv = 0; nt = 0; xf = M2.Id; depth = 0; }
 
     /// 之后加进来的点都先过这个变换（手机要绕自己中心转、弹幕残影要缩一点）
-    public void Push(float x, float y, float rot, float scale = 1f) {
-        xf = M2.Trs(x, y, rot, scale, scale); xfOn = true;
+    public void Push(float x, float y, float rot, float scale = 1f) => Push(x, y, rot, scale, scale);
+
+    public void Push(float x, float y, float rot, float sx, float sy) {
+        stack[depth] = xf;
+        var m = M2.Trs(x, y, rot, sx, sy);
+        xf = depth > 0 ? M2.Mul(xf, m) : m;   // 先自己再外层
+        depth++;
     }
-    public void Pop() { xf = M2.Id; xfOn = false; }
+    public void Pop() { if (depth > 0) xf = stack[--depth]; }
 
     int V(float x, float y, Color col) {
-        if (xfOn) { var p = xf.Apply(x, y); x = p.X; y = p.Y; }
+        if (depth > 0) { var p = xf.Apply(x, y); x = p.X; y = p.Y; }
         if (nv == vs.Length) {
             Array.Resize(ref vs, nv * 2);
             Array.Resize(ref cs, nv * 2);
@@ -215,21 +224,34 @@ public class Draw2D {
 
     static readonly List<Vector2> heartBuf = new List<Vector2>();
 
-    /* 爱心轮廓点。网页版是两段三次贝塞尔，这里直接把它采样成折线 —— 反正最后
-       都要三角化，采 24 段在观众端那个尺寸上已经看不出是折线。
-       顶点在 -r*0.62 而不是 -r：爱心的视觉重心明显偏下，按外接盒居中的话一堆
-       爱心飘起来会整体显得往上飘了半个身位。 */
+    /* 爱心轮廓点 —— 网页版 fx.js 里 heartPath 那两段三次贝塞尔，逐控制点采样成
+       折线。反正最后都要三角化，采 24 段在观众端那个尺寸上已经看不出是折线。
+
+       ⚠ 别换成心形参数方程（x=16sin³t 那个）。两者形状差得比看上去多：参数方程
+       的最宽点就是 r，而这两段贝塞尔的最宽点只有 0.78r、却高 1.67r —— 同一个 r
+       换过去，爱心宽 28%、扁 20%。档 4 一次炸出三十颗，那个差别的直接后果是
+       两张脸被糊死，而脸是这个玩法仅有的两个可读信息之一。
+
+       顶点在 -r*1.02（控制点）而不是 -r：爱心的视觉重心明显偏下，按外接盒居中
+       的话一堆爱心飘起来会整体显得往上飘了半个身位。 */
     public static List<Vector2> HeartPts(float cx, float cy, float r, int seg = 24) {
         heartBuf.Clear();
-        for (int i = 0; i < seg; i++) {
-            float t = Mathf.Pi * 2f * i / seg;
-            float st = Mathf.Sin(t);
-            float x = 16f * st * st * st;
-            float y = -(13f * Mathf.Cos(t) - 5f * Mathf.Cos(2f * t)
-                      - 2f * Mathf.Cos(3f * t) - Mathf.Cos(4f * t));
-            heartBuf.Add(new Vector2(cx + x * r / 16f, cy + y * r / 16f));
-        }
+        int n = Mathf.Max(3, seg / 2);
+        Cubic(cx, cy, r, 0f, 0.92f, -1.08f, 0.10f, -0.62f, -1.02f, 0f, -0.34f, n);
+        Cubic(cx, cy, r, 0f, -0.34f, 0.62f, -1.02f, 1.08f, 0.10f, 0f, 0.92f, n);
         return heartBuf;
+    }
+
+    /// 三次贝塞尔采样，控制点按 r 归一化给。含起点不含终点，两段接得上
+    static void Cubic(float cx, float cy, float r,
+                      float x0, float y0, float x1, float y1,
+                      float x2, float y2, float x3, float y3, int n) {
+        for (int i = 0; i < n; i++) {
+            float t = (float)i / n, u = 1f - t;
+            float a = u * u * u, b = 3f * u * u * t, c = 3f * u * t * t, d = t * t * t;
+            heartBuf.Add(new Vector2(cx + (a * x0 + b * x1 + c * x2 + d * x3) * r,
+                                     cy + (a * y0 + b * y1 + c * y2 + d * y3) * r));
+        }
     }
 
     /// 椭圆环（描边，不填充）。竖屏里是贴着地面看的冲击环，所以纵向压扁
@@ -240,6 +262,44 @@ public class Draw2D {
             var cur = new Vector2(cx + Mathf.Cos(a) * rx, cy + Mathf.Sin(a) * ry);
             Segment(prev, cur, width, col);
             prev = cur;
+        }
+    }
+
+    readonly float[] rt = new float[4];
+    readonly Color[] rc = new Color[4];
+    static int[] ringA = new int[32], ringB = new int[32];
+
+    /* 四档径向渐变，用同心环带做出来。中心那一档的 t 恒为 0。
+       网页版所有 createRadialGradient（光斑、绒絮、弹道色晕）在这里全走它。
+       那边必须先烘成离屏贴图，是因为 canvas 每帧重算渐变太贵、又没有 modulate
+       可以一张贴图配多种颜色；Godot 这边顶点色本来就是逐像素线性插值，结果与
+       渐变逐像素相同，而且所有粒子进同一批三角形、一次提交，比贴图还省。
+
+       只有三档的渐变（绒絮）照样用它 —— 在中间补一个线性插值算得出的档，
+       形状一模一样，省掉一个只差一档的重载。 */
+    public void Radial(float cx, float cy, float rx, float ry,
+                       Color c0, float t1, Color c1, float t2, Color c2, float t3, Color c3,
+                       int seg = 20) {
+        rt[0] = 0f; rc[0] = c0;
+        rt[1] = t1; rc[1] = c1;
+        rt[2] = t2; rc[2] = c2;
+        rt[3] = t3; rc[3] = c3;
+        if (ringA.Length < seg + 1) { ringA = new int[seg + 1]; ringB = new int[seg + 1]; }
+        var prev = ringA; var cur = ringB;
+        int center = V(cx, cy, rc[0]);
+        for (int i = 0; i <= seg; i++) prev[i] = center;
+        for (int k = 1; k < 4; k++) {
+            float t = rt[k];
+            for (int i = 0; i <= seg; i++) {
+                float a = Mathf.Pi * 2f * i / seg;
+                cur[i] = V(cx + Mathf.Cos(a) * rx * t, cy + Mathf.Sin(a) * ry * t, rc[k]);
+            }
+            for (int i = 0; i < seg; i++) {
+                // 第一圈的"上一圈"整圈都是中心点，退化成扇形，别画零面积的三角形
+                if (k == 1) Tri(prev[i], cur[i], cur[i + 1]);
+                else { Tri(prev[i], prev[i + 1], cur[i + 1]); Tri(prev[i], cur[i + 1], cur[i]); }
+            }
+            (prev, cur) = (cur, prev);
         }
     }
 

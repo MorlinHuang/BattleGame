@@ -261,7 +261,8 @@ public partial class PanelView : Node2D {
 
     string Head() {
         if (S.phase == Phase.Idle)
-            return $"调试台  p={S.p:0.0}  对抗线x={Director.FrontAt(FX.phoneY):0}  {Engine.GetFramesPerSecond()}fps"
+            return $"调试台  p={S.p:0.0}  对抗线x={Director.FrontAt(FX.phoneY):0}"
+                 + $"  粒子{Particles.Count} 弹幕{Ammo.Count}  {Engine.GetFramesPerSecond()}fps"
                  + "   ·  [1-5]查岗党送礼  [Q-T]灭迹党  [空格]开局  [←→]±7  [L]对抗线  [F1]隐藏面板";
         float mm = Mathf.Max(0f, S.clock);
         string s = $"p={S.p:0.0}  火力 {S.fA:0}:{S.fB:0}  净差{S.fA - S.fB:0}  "
@@ -270,7 +271,7 @@ public partial class PanelView : Node2D {
         if (S.stand > 0f) s += $"  反击{S.stand:0}";
         if (S.phase == Phase.Over)
             s += "  " + (S.winner > 0 ? "查岗党胜" : S.winner < 0 ? "灭迹党胜" : "平局");
-        return s + $"   {Engine.GetFramesPerSecond()}fps";
+        return s + $"   粒子{Particles.Count} 弹幕{Ammo.Count}  {Engine.GetFramesPerSecond()}fps";
     }
 
     /* 文字层。与 HudView 同样的理由走 SystemFont：Godot 内置字体没有汉字，
