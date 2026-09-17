@@ -1,7 +1,7 @@
 /* 《查手机》网页版 —— 单一真源驱动。
  *
  * 全场唯一状态是 S.p（查岗党进度 0~100）。它派生出 FX.phoneX，对抗线、
- * 刻度尺、地面分色、HUD、角色取哪一帧，全部读它。画面上没有第二个战况
+ * 地面分色、HUD、角色取哪一帧，全部读它。画面上没有第二个战况
  * 来源，所以"对抗线对不上画面"在构造上不可能发生。
  */
 const W = 960, H = 1334;
@@ -18,7 +18,7 @@ const P = {
   half: 108,       // 对抗线最大偏移
   drag: 0.58,      // 角色整体跟随对抗线的比例
   tilt: 1.55, bulge: 46, linkW: 0.80, shapeRate: 2.6,
-  phoneY: 560,     // 对抗线上"手机所在高度"，刻度与辉光的锚
+  phoneY: 560,     // 对抗线上"手机所在高度"，气泡与辉光的锚
   rug: { top: 738, bot: 1128, tl: 88, tr: 872, bl: 28, br: 912 },  // 底版里地毯四角
 
   /* 挨一下之后的反应。冲击沿对抗线传播、角色被推开又弹回，两件事各有一套
@@ -753,7 +753,7 @@ function sampleRow(arr, y) {
   const p0 = arr[Math.max(0, i - 1)], p1 = arr[i], p2 = arr[i + 1], p3 = arr[Math.min(ROWS - 1, i + 2)];
   return p1 + 0.5 * f * (p2 - p0 + f * (2 * p0 - 5 * p1 + 4 * p2 - p3 + f * (3 * (p1 - p2) + p3 - p0)));
 }
-// 对抗线在高度 y 处的横坐标 —— 手机、光柱、刻度、地面分色全读这一个函数
+// 对抗线在高度 y 处的横坐标 —— 手机、光柱、顶端指针、地面分色全读这一个函数
 const frontAt = (y) => FX.phoneX + sampleRow(FX.rowOff, y) + sampleRow(FX.rowImp, y);
 const heatAt = (y) => clamp(sampleRow(FX.rowHeat, y), 0, 1);
 const phonePos = () => [frontAt(FX.phoneY) + FX.jit, FX.phoneY];
@@ -870,7 +870,7 @@ function drawLine(ctx, k = 1) {
 
    所以战线改成在地上走：深色带 + 势力色描边，靠轮廓而不是靠发光，明亮底图
    上反而更显眼；又完全不挡人。读数一点没少 —— 战线横坐标仍然是 frontAt，
-   和手机、刻度尺、地面辉光同一个源。 */
+   和手机、顶端指针、地面辉光同一个源。 */
 function drawFrontGround(ctx, bias) {
   const R = P.rug, col = Math.abs(bias) < 0.06 ? [250, 250, 250] : (bias > 0 ? GREEN : RED);
   const N = 14;
@@ -902,7 +902,7 @@ function drawFrontGround(ctx, bias) {
    它能脱离地面带单独存在（?line=3，默认），而且这正是推荐的用法 —— 地上
    那条带子横在两个人的腿中间，激烈的时候被挡掉大半，剩下的半截读起来像
    一根立在地上的杆子；指针在画面顶端，既不挡人也永远看得见。
-   完全不画（?line=0）也能看出谁占优（地面辉光、血条、刻度尺都在），但读不
+   完全不画（?line=0）也能看出谁占优（地面辉光、血条都在），但读不
    出战线此刻**具体**压在哪一条竖线上，而手机位移就是这个玩法的进度条。 */
 function drawFrontMark(ctx, bias) {
   const col = Math.abs(bias) < 0.06 ? [255, 255, 255] : (bias > 0 ? GREEN : RED);
@@ -944,29 +944,6 @@ function drawGround(ctx, bias) {
   rg.addColorStop(0, rgba(col, 0.30 + 0.28 * k));
   rg.addColorStop(1, rgba(col, 0));
   ctx.fillStyle = rg; ctx.fillRect(0, R.top, W, span);
-  ctx.restore();
-}
-
-/* 地毯前缘的固定标尺 + 跟着对抗线滑的指针 —— 刻度不动、指针动，
-   才看得出"推进了多少"；原来刻度跟着线一起动，等于没有参照物。 */
-function drawRuler(ctx) {
-  const R = P.rug, y = R.bot + 16, L = R.bl + 26, Rr = R.br - 26;
-  ctx.save();
-  ctx.fillStyle = 'rgba(10,12,16,.34)';
-  ctx.fillRect(L - 8, y - 4, Rr - L + 16, 9);
-  for (let i = 0; i <= 10; i++) {
-    const x = L + (Rr - L) * i / 10, big = i === 5, w = big ? 5 : 3, h = big ? 16 : 10;
-    ctx.fillStyle = big ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.62)';
-    ctx.fillRect(x - w / 2, y - h / 2, w, h);
-  }
-  const fx = clamp(frontAt(R.bot) + FX.jit, L, Rr);
-  const b = (S.p - 50) / 50;
-  const col = Math.abs(b) < 0.06 ? [255, 255, 255] : (b > 0 ? GREEN : RED);
-  ctx.fillStyle = rgba(col, .95);
-  ctx.beginPath();
-  ctx.moveTo(fx, y - 12); ctx.lineTo(fx - 11, y - 28); ctx.lineTo(fx + 11, y - 28);
-  ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 2; ctx.stroke();
   ctx.restore();
 }
 
@@ -1078,8 +1055,8 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     },
   });
 
-  /* 气泡挂在手机上 —— phonePos 是对抗线在手机高度上的横坐标，跟手机、刻度尺、
-     地面辉光同一个源，所以消息永远是从正在被抢的那部手机里冒出来的。 */
+  /* 气泡挂在手机上 —— phonePos 是对抗线在手机高度上的横坐标，跟手机、地面
+     辉光同一个源，所以消息永远是从正在被抢的那部手机里冒出来的。 */
   Bubble.init({ phoneAt: phonePos });
 
   const bg = await load('assets/bg.jpg');
@@ -1129,7 +1106,7 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
   document.getElementById('auto').checked = S.auto;
   for (let i = 0; i < 90; i++) derive(1 / 60);   // 预热，让指数趋近收敛到位
 
-  /* 震动只作用在"正在发生冲突的东西"上 —— 对抗线、角色、粒子、刻度尺。
+  /* 震动只作用在"正在发生冲突的东西"上 —— 对抗线、角色、粒子。
      房间和地毯不动：机位是固定的，整幅画面一起震就得把背景放大做 overscan
      才不露边，而背景一放大，地毯四角那组标定坐标就全偏了。HUD 也不震，它
      不在场景里。 */
@@ -1165,7 +1142,6 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
        带子在地上，挡住了也没关系 —— 顶端那个指针替它做读数。 */
     if (S.line === 1) drawLine(fctx, 0.42);
     else if (S.line >= 2) drawFrontMark(fctx, bias);
-    drawRuler(fctx);
     // 气泡在弹幕之下：它贴在后面那堵墙上，弹幕是前景，飞过时该压过去
     Bubble.draw(fctx);
     /* 弹幕在角色之上、粒子之下：它飞向两个人中间，画在角色底下的话命中前

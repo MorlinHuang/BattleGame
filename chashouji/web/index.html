@@ -3,13 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>查手机 v13 — 关键帧版（每 1%）</title>
+<title>查手机</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:#0c0e12;color:#e8ecf2;font:14px/1.6 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;
        display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px}
   h1{font-size:17px;font-weight:600;letter-spacing:.02em}
-  h1 span{color:#7f8896;font-weight:400;font-size:13px;margin-left:8px}
   #stage{position:relative;width:min(46vw,420px);aspect-ratio:960/1334;border-radius:12px;
          overflow:hidden;box-shadow:0 12px 44px rgba(0,0,0,.6)}
   #stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
@@ -27,13 +26,12 @@
   #hitL{border-color:#4a7a33;color:#9ee87a} #hitR{border-color:#7a3a3a;color:#ff9b9b}
   label{display:flex;align-items:center;gap:5px;color:#aab3c0;font-size:13px;cursor:pointer;user-select:none}
   #stat,#msg{font:12px ui-monospace,Menlo,monospace;color:#6d7683}
-  #out{display:none;width:100%;height:170px;background:#11151b;color:#b8c2ce;border:1px solid #2c333f;
-       border-radius:7px;padding:8px;font:11px/1.45 ui-monospace,Menlo,monospace;resize:vertical}
-  .hint{color:#6d7683;font-size:12px}
+  /* 逐帧战况读数是开发信息，默认不出现 —— 这个页面要拿给合作方体验。?dev=1 打开 */
+  #devrow{display:none}
 </style>
 </head>
 <body>
-<h1>查手机 v13<span>0~100 每 1% 一张 · 单一真源</span></h1>
+<h1>查手机</h1>
 
 <div id="stage">
   <canvas id="bg" width="960" height="1334"></canvas>
@@ -65,15 +63,13 @@
   </div>
   <div class="row">
     <button id="start">开始对局</button>
-    <span style="opacity:.6;font-size:12px">礼物注入火力 → 双方火力对冲 → 只有净差才拽手机。①~④ 是表现档。</span>
   </div>
   <div class="row">
     <label>直击力度<select id="pw"><option value="1">点赞级</option><option value="2" selected>普通礼物</option><option value="3">大礼物</option></select></label>
     <label>对抗线<select id="lv"><option value="0">全去掉</option><option value="1">原发光柱</option><option value="2">地面战线+指针</option><option value="3" selected>只要指针</option></select></label>
     <label><input id="auto" type="checkbox" checked>自动演示</label>
   </div>
-  <div class="row"><span id="stat"></span><span id="msg"></span></div>
-  <div class="hint"><b>数值是两层的。</b>礼物注入的是<b>火力</b>，双方火力互相对冲，<b>只有净差</b>才把手机往一边拽 —— 两边都在猛刷时差值很小，满屏对撞而手机纹丝不动，那正是拔河该有的样子；一方停手，差值立刻拉开。稳态下净差 = 两边刷礼物的<b>速度差</b> ÷ 自然流失，所以手机快慢只取决于速度差，与刷了多少总量无关。<br>屏幕上飞的东西就是火力的消耗形式：<b>对冲掉的那部分在中线互相撞掉</b>，只有多出来的才砸到人身上。"我刷了礼物怎么手机没动"的答案就写在画面上 —— 你的东西被对面在半空撞掉了。血条下面那两条细带是双方火力，它们一起涨就说明在对拼。<br>礼物分两套档：<b>数值九档</b>跟着抖音平台礼物走（点赞 1 → 神秘空投 600，相对价值继承《螂人杀》已验证的兵数比例），<b>表现只有五档</b> —— 档数的上限不是价格带定的，是"观众能不能分辨"定的。扩档靠质变：有没有实体 → 震不震 → 染不染色 → <b>独不独占屏幕</b>。神秘空投落地后 0.8 秒里别的东西都得让开，它买的不是更大的数字，是一段没人打断的时间。<br>飞出去的东西按<b>档 1~2 客厅现场 + 档 3~4 甜蜜反击</b>配：发卡瓜子、抱枕手柄是顺手抓的，一局出现上百次，好处恰恰是不够特别；玫瑰花束、奶茶、求婚戒指盒、合照相框一局只有几次，要的是「我没见过」—— <b>吵到最后砸过来的是一束花</b>，越贵越甜，不是打死他是甜死他。这也让「不能血腥」从一条限制变成了卖点。<br>推到端点还要<b>按住三秒</b>才算赢；被压着太久会进绝杀倒计时；第一次被推到最后 8 个百分点触发<b>反击时刻</b>，劣势方注入翻倍两分钟。手机有速度上限，最快也要一分钟才能从中点推到底 —— 再大的力气，手机也不可能瞬间飞过去。<br>角色是 0~100 每 1% 一张，其中 29 档生图画的、其余光流插出来，按 p 取最近的一张硬切。打一下会同时动五样：粒子、对抗线冲量、角色被推开、屏幕震动、顿帧，强度一起缩放。<b>常规火力弹幕一律不顿帧</b>，只有礼物事件才打断 —— 背景火力要是也顿，世界就长期停摆了。<br>拖尾画的是它真正走过的路径（记十六帧轨迹，<b>按距离</b>往回取），大件按身长拖、快件按速度拖。弹道分三层：外圈色晕（明亮客厅上"发光"只能是色晕，加光加不上去）、中间暗拖尾加亮芯、最后四个只画外轮廓的残影。<br>手机上方会一条条冒出<b>聊天气泡</b>：这个玩法争的是一部手机，而手机里有什么此前一个字都没交代。位置按底版量过，从手机正上方升起、停在墙上，不挡脸也不挡手。撤回提示和语音条什么都没说，反而比任何一句台词都有劲。<br>调试台（未开局）里滑块和"+7"按钮直接改进度，用来调特效；点任意礼物按钮会自动开局，这之后进度只能由火力差推出来。</div>
+  <div class="row" id="devrow"><span id="stat"></span><span id="msg"></span></div>
 </div>
 
 <script>
@@ -87,6 +83,9 @@
   var q = v ? '?v=' + encodeURIComponent(v) : '';
   var fs = ['fx.js', 'ammo.js', 'bubble.js', 'main.js'];
   for (var i = 0; i < fs.length; i++) document.write('<scr' + 'ipt src="' + fs[i] + q + '"></scr' + 'ipt>');
+  /* 读数行本身要留着（截图与压测都往里写），只是默认藏起来。这里必须写死 'flex'
+     而不是清空 —— 清空只是去掉行内样式，#devrow{display:none} 那条还在，行还是不出来。 */
+  if (new URLSearchParams(location.search).has('dev')) document.getElementById('devrow').style.display = 'flex';
 })();
 </script>
 </body>
