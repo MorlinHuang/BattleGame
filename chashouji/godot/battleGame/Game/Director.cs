@@ -13,6 +13,11 @@ public partial class Director : Node2D {
     FrontMarkView front;
     RulerView ruler;
     HudView hud;
+    PanelView panel;
+
+    /* 调试台自动演示的方向。网页版里它是 boot 的局部变量，这里只能是字段 ——
+       但它属于"调试台怎么走"，不属于对局状态，所以不进 S。 */
+    static int autoDir = 1;
 
     public override void _Ready() {
         /* 层序（ZIndex）。背景在最底，角色压着地面辉光，指针在最上面 ——
@@ -23,7 +28,14 @@ public partial class Director : Node2D {
         front  = new FrontMarkView(); front.Init(this, 20, 60);
         ruler  = new RulerView(this, 40);
         hud    = new HudView(this, 80);
-        StartMatch();
+        panel  = new PanelView(); panel.Init(this, 200);
+        foreach (var a in OS.GetCmdlineUserArgs())
+            if (a == "--nopanel") panel.Showing = false;
+
+        /* 这里**不**调 StartMatch()。网页版一进来停在调试台（phase=idle）：±7 和
+           自动演示能直接摆进度，专门用来调特效；点任意礼物或"开始对局"才进 play，
+           之后进度只能由火力差推出来。少了 idle 这个状态，"某件礼物到底推了多少"
+           就没有干净的对照 —— 手动摆过一次 p，这一局后面所有读数都不能用了。 */
     }
 
     public static void StartMatch() {
@@ -38,6 +50,16 @@ public partial class Director : Node2D {
         float dt = (float)dtd;
         S.t += dt;
         Battle(dt);
+
+        /* 调试台的自动演示：手机自己来回走，用来逐个 p 值看画面。它与 battle
+           互斥 —— play 下这段不跑，进度只能由火力差推。两者混在一起的话，
+           画面在动但说不清是谁推的。 */
+        if (S.auto && S.phase == Phase.Idle) {
+            S.p += autoDir * dt * 9f * (0.35f + Mathf.Abs(Mathf.Sin(S.t * 0.27f)) * 1.5f);
+            if (S.p > 97f) { S.p = 97f; autoDir = -1; }
+            if (S.p < 3f)  { S.p = 3f;  autoDir = +1; }
+        }
+
         Derive(dt);
 
         float bias = (S.p - 50f) / 50f;
@@ -46,6 +68,7 @@ public partial class Director : Node2D {
         front.Rebuild(bias, S.line);
         ruler.Rebuild();
         hud.Rebuild(S.p);
+        panel.Rebuild();
     }
 
     // ---------- 数值层：算出 S.p ----------
@@ -127,6 +150,15 @@ public partial class Director : Node2D {
     }
 
     static void Finish(int who) { S.phase = Phase.Over; S.winner = who; }
+
+    /* 回到调试台。对应网页版 start 按钮的另一半：清火力、停表，但**保留 p 的
+       当前位置** —— 常用法就是打到某个局面觉得画面不对，退回调试台就地调特效。 */
+    public static void BackToIdle() {
+        S.phase = Phase.Idle;
+        S.fA = S.fB = 0f; S.budA = S.budB = 0f;
+        S.debA = S.debB = S.debKA = S.debKB = 0f;
+        // Ammo.Clear() 在 ammo 层搬过来之后接上
+    }
 
     /* 火力转成弹幕。clash 的那些飞到中线就互相撞掉，只有剩下的才砸到人身上 ——
        这是"对冲"唯一的可视化，没有它观众看不懂自己刷的东西去哪了。 */
