@@ -734,7 +734,8 @@ const GIFT = {
   // 查岗党（女方，在左，from=+1）
   hairpin: { from: +1, style: 'volley', item: 'hairpin', r: 22, n: 8, power: 1, recipe: 'star',    push: 1 },
   pillow:  { from: +1, style: 'single', item: 'pillow',  r: 56,       power: 2, recipe: 'feather', push: 20 },
-  bouquet: { from: +1, style: 'heavy',  item: 'bouquet', r: 76,       power: 3, recipe: 'petal',   push: 230 },
+  // spin：贴图转盘专用的转速（rad/s）。矢量物品不需要，见 ammo.js 里 fire() 的注释
+  bouquet: { from: +1, style: 'heavy',  item: 'bouquet', r: 76, spin: 14, power: 3, recipe: 'petal',   push: 230 },
   /* 档 4 的 r 看着不大，是因为 exec 会再乘 1.8（ammo.js）：64→115、68→122，
      占屏宽的 24% 与 25%。飞行体积负责预告"这一下很重"，兑现在命中那一刻的
      绽放里 —— 所以本体不必再大，大的是绽开的东西。 */
@@ -1087,8 +1088,11 @@ const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload 
     Array.from({ length: 101 }, (_, p) =>
       load(`assets/frames/f${String(p).padStart(3, '0')}.png`).catch(() => null)));
   const seq = new FrameSeq(frames);
+  // 物品的 3D 转盘贴图。失败不阻塞：加载不到就退回 ITEM 里的矢量画法
+  const sprOK = await Ammo.loadSprites(Q0.get('v'), Q0.get('nosprite') === '1');
   document.getElementById('msg').textContent =
-    `${frames.filter(Boolean).length}/101 档 · 每 1%`;
+    `${frames.filter(Boolean).length}/101 档 · 每 1%` +
+    (sprOK.some(Boolean) ? ` · 物品转盘 ${sprOK.filter(Boolean).length}` : '');
 
   const Q = new URLSearchParams(location.search);
 

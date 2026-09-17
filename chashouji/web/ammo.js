@@ -299,6 +299,50 @@ const Ammo = (function () {
   /* 色晕贴图一次性烘好。这台机器没有 GPU，每帧 createRadialGradient 是最贵的
      几件事之一 —— 跟 fx.js 里光斑的处理是同一个理由。六件物品六张，建完就
      不再动。 */
+  /* 3D 渲出来的转盘序列。
+     物品有两种画法：`ITEM` 里的矢量函数（画得出但转起来光影跟着一起转，物理上
+     是错的），和这里的贴图序列（每个角度都是 Blender 渲的，光影各自正确）。
+     有贴图就用贴图，没有就退回矢量 —— `?sim` 那条分支不加载任何素材，必须能退。
+
+     `cell` 是单格边长，`n` 是转盘帧数，`scale` 补偿裁剪留白：图集是按**所有
+     角度的并集**裁的，单帧物体填不满一格。 */
+  const SPRITE = {
+    bouquet: { src: 'assets/items/rose_atlas.png', n: 36, cols: 6, cell: 268, scale: 1.34 },
+  };
+
+  function loadSprites(ver, off) {
+    // ?nosprite=1 强制退回矢量画法 —— 用来和转盘版并排对比，两条路都要留着
+    if (off) return Promise.resolve([]);
+    const q = ver ? '?v=' + encodeURIComponent(ver) : '';
+    return Promise.all(Object.keys(SPRITE).map((k) => new Promise((done) => {
+      const sp = SPRITE[k], im = new Image();
+      im.onload = () => {
+        sp.img = im;
+        /* 残影层要的是**单色剪影**，而贴图是彩色的。一次性烘一张染好色的
+           副本，运行时直接 drawImage —— 跟 aura() 的做法是同一个理由：
+           这台机器没有 GPU，每帧做合成是最贵的几件事之一。 */
+        const c = document.createElement('canvas');
+        c.width = im.width; c.height = im.height;
+        const g = c.getContext('2d');
+        g.drawImage(im, 0, 0);
+        g.globalCompositeOperation = 'source-in';
+        g.fillStyle = `rgb(${TAIL[k] || '52,40,36'})`;
+        g.fillRect(0, 0, c.width, c.height);
+        sp.silh = c;
+        done(true);
+      };
+      im.onerror = () => done(false);       // 缺素材不阻塞，退回矢量画法
+      im.src = sp.src + q;
+    })));
+  }
+
+  // 当前朝向对应转盘的哪一格
+  function cellOf(sp, rot) {
+    let k = Math.floor(rot / 6.2832 * sp.n) % sp.n;
+    if (k < 0) k += sp.n;
+    return k;
+  }
+
   const auraCache = new Map();
   function aura(rgb) {
     const key = rgb[0] + ',' + rgb[1] + ',' + rgb[2];
@@ -437,7 +481,13 @@ const Ammo = (function () {
     if (p.exec) { p.vx *= 0.5; p.ax *= 0.35; p.vrot *= 0.5; }
     p.rot = Math.random() * 6.283;
     // 转速跟着体量走，小东西翻得快。方向也随机，一批里有顺时针有逆时针
-    p.vrot = (Math.random() - 0.5) * (g.style === 'volley' ? 26 : g.style === 'single' ? 13 : 4.5);
+    /* 转速。矢量物品转的是一张平面图，快了只会晃眼；贴图物品转的是真的转盘，
+       **必须在飞行途中转够一圈以上**，观众才看得出它是个有厚度的东西。
+       重投飞完全程约 0.65 秒，给 14 rad/s 差不多是一圈半。
+       符号仍随机：顺着翻和倒着翻都是合理的姿势。 */
+    p.vrot = g.spin
+      ? (Math.random() < 0.5 ? -1 : 1) * g.spin * (0.85 + Math.random() * 0.3)
+      : (Math.random() - 0.5) * (g.style === 'volley' ? 26 : g.style === 'single' ? 13 : 4.5);
     /* 轨迹环形缓冲：拖尾画的是这个东西**真正走过**的地方。原先那几条速度线
        是固定画在本体后方的，跟实际路径无关，所以飞得快飞得慢看上去一个样；
        记下真实轨迹之后，拖尾长度自己就跟速度挂上钩了。 */
@@ -597,28 +647,57 @@ const Ammo = (function () {
 
          间距按距离均分，所以残影之间永远接得上：间距大于物体宽度的话读出来
          是"一串独立的小东西"，而不是"一个东西拖出来的影"。 */
+      const sp = SPRITE[p.item];
+      const useSp = sp && sp.img;
+
       ctx.save();
       ctx.fillStyle = `rgb(${TAIL[p.item] || '52,40,36'})`;
       const silh = SILH[p.item];
-      for (let k = 4; k >= 1; k--) {
-        const idx = backAt(p, reach * k * 0.25);
-        ctx.globalAlpha = 0.40 - k * 0.068;
+      /* 残影数量和浓度分两套。矢量物品的 SILH 是**刻意简化过的**轮廓（花束就是
+         七个圆），四个叠起来仍读作"影子"；贴图剪影带着全部细节（每片花瓣、
+         叶子、包装纸），同样画四个、同样的浓度，糊出来是一大团暗红，比本体
+         还抢眼，读成"另一个物体"而不是它的轨迹。
+         贴图本身转盘就带足了运动信息，两个淡影够了。 */
+      const k0 = useSp ? 2 : 4, ka = useSp ? 0.5 : 1;
+      for (let k = k0; k >= 1; k--) {
+        const idx = backAt(p, reach * k / k0);
+        ctx.globalAlpha = (0.40 - k * 0.068) * ka;
         ctx.save();
         ctx.translate(p.hx[idx], p.y);
-        ctx.rotate(p.hr[idx]);
         const sc = 1 - k * 0.05;
-        ctx.scale(sc, sc);
-        silh(ctx, p.r);
-        ctx.fill();
+        if (useSp) {
+          /* 残影取**那一刻的朝向**对应的格子，不是当前朝向 —— 用当前朝向的话
+             四个残影会是同一个姿势，读成"复制粘贴"而不是"它飞过来的轨迹"。
+             这跟 hr[] 记录历史旋转角是同一个用意。 */
+          const c = cellOf(sp, p.hr[idx]), e = sp.cell;
+          const d = p.r * sp.scale * 2 * sc;
+          ctx.drawImage(sp.silh, (c % sp.cols) * e, ((c / sp.cols) | 0) * e, e, e,
+                        -d / 2, -d / 2, d, d);
+        } else {
+          ctx.rotate(p.hr[idx]);
+          ctx.scale(sc, sc);
+          silh(ctx, p.r);
+          ctx.fill();
+        }
         ctx.restore();
       }
       ctx.restore();
 
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(p.rot);
-      ctx.lineJoin = 'round';
-      ITEM[p.item](ctx, p.r);
+      if (useSp) {
+        /* 贴图本体：**不转 canvas**。转盘序列里每一格自己就是那个角度渲好的，
+           再叠一次 2D 旋转就成了"又翻又转"，而且光影会跟着 canvas 一起转，
+           那正是换 3D 要解决的问题。 */
+        const c = cellOf(sp, p.rot), e = sp.cell;
+        const d = p.r * sp.scale * 2;
+        ctx.drawImage(sp.img, (c % sp.cols) * e, ((c / sp.cols) | 0) * e, e, e,
+                      -d / 2, -d / 2, d, d);
+      } else {
+        ctx.rotate(p.rot);
+        ctx.lineJoin = 'round';
+        ITEM[p.item](ctx, p.r);
+      }
       ctx.restore();
     }
   }
@@ -628,5 +707,5 @@ const Ammo = (function () {
     queue.length = 0; warns.length = 0; pending.length = 0; lock = 0;
   }
 
-  return { init, launch, update, draw, clear, ITEM, count: () => act.length + queue.length };
+  return { init, launch, update, draw, clear, loadSprites, ITEM, count: () => act.length + queue.length };
 })();
