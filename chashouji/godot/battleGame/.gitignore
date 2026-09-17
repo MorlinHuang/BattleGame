@@ -1,0 +1,8 @@
+# Godot 生成物
+.godot/
+.import/
+export_presets.cfg
+# .NET 生成物
+bin/
+obj/
+*.user

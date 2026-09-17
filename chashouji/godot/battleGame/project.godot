@@ -1,0 +1,60 @@
+; 《查手机》Godot 版。
+;
+; 渲染后端选 gl_compatibility 而不是默认的 Forward+：这个玩法是纯 2D，
+; Forward+ 的簇化光照、SDFGI、体积雾一样用不上，却要多付启动时间和显存。
+; 换 Godot 的两个理由就是启动快和没有许可证，这里不能自己把第一条还回去。
+
+config_version=5
+
+[application]
+
+config/name="查手机 BattleGame"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
+
+[dotnet]
+
+project/assembly_name="battleGame"
+
+[display]
+
+; 画布 960x1334，与网页版逐字一致。canvas_items 拉伸模式让整套画布坐标
+; （原点左上、y 向下、1 单位 = 1 像素）在任何窗口尺寸下都成立 ——
+; 移植过来的几何数值一个都不用改。
+window/size/viewport_width=960
+window/size/viewport_height=1334
+window/size/window_width_override=540
+window/size/window_height_override=750
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+; 背景是整张照片铺满，不需要每帧先清一遍颜色
+environment/defaults/default_clear_color=Color(0.07, 0.07, 0.08, 1)
+textures/canvas_textures/default_texture_filter=1
+
+[importer_defaults]
+
+; ⚠️ 这一段必须在素材第一次被导入**之前**就位。
+; Godot 默认把纹理导入成 VRAM 压缩（S3TC/BPTC），那是为照片和 3D 贴图设计的
+; 有损格式；而这套素材是平涂色块 + 硬描边 + alpha 的线稿，压完描边会出麻边、
+; 大片平色会出块状色带 —— 正是这个玩法唯一能看的东西被毁掉。
+; compress/mode=0 是 Lossless。
+;
+; 写在这里而不是逐张改 89 个 .import 文件：那 89 个文件是导入产物，改它们是
+; 在结果上打补丁，下次谁重新导入一次就全回去了。
+texture={
+"compress/mode": 0,
+"compress/high_quality": false,
+"compress/hdr_compression": 0,
+"compress/normal_map": 0,
+"compress/channel_pack": 0,
+"mipmaps/generate": false,
+"process/fix_alpha_border": true,
+"process/premult_alpha": false,
+"process/normal_map_invert_y": false,
+"detect_3d/compress_to": 0
+}
