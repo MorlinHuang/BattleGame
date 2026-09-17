@@ -40,9 +40,19 @@ public partial class PanelView : Node2D {
     /* 命令行 --click=x,y（画布坐标）与 --key=<Key枚举名>：等几帧后注入一次
        点击 / 按键。对应网页版的 ?live=…&liveGift=… —— 交互链路必须能在无人值守
        的截图里走一遍，否则"按钮到底点不点得动"只能靠人坐在那儿点。 */
+    /* 最近一次输入事件，显示在状态行尾巴上。对应网页版 index.html 里的 #msg。
+       不是纯调试装饰：点了没反应时，它能直接区分"事件没到"（这里一片空白）
+       和"事件到了但没命中"（这里有坐标）—— 否则只能靠猜。 */
+    static string lastMsg = "";
+    static float lastMsgT = -9f;
+    static void Say(string m) { lastMsg = m; lastMsgT = S.t; }
+
     Vector2? clickAt;
     string keyName;
-    int injectWait = 6;
+    /* 等 30 帧再注入，不是 6 帧。canvas transform 在最初几帧里还是单位阵，
+       stretch 尚未生效 —— 那时换算出来的坐标是错的，而且错得很隐蔽：正变换给
+       单位阵、逆变换却已经是缩放阵，两边对不上。我就是被这个矛盾带偏过一次。 */
+    int injectWait = 30;
     bool diag;
 
     static readonly Color NEUTRAL = MathX.C255(180, 190, 205);
@@ -94,9 +104,11 @@ public partial class PanelView : Node2D {
         btns.Add(new Btn { x = Cx(2), y = R3, w = cw, h = BH, label = "灭迹 +7",
                            tone = K.RED,   act = () => Nudge(-7f) });
         btns.Add(new Btn { x = Cx(3), y = R3, w = cw, h = BH, tone = NEUTRAL,
-                           dyn = () => "对抗线 " + S.line, act = () => S.line = (S.line + 1) % 4 });
+                           dyn = () => "对抗线 " + S.line,
+                           act = () => { S.line = (S.line + 1) % 4; Say("对抗线档位 " + S.line); } });
         btns.Add(new Btn { x = Cx(4), y = R3, w = cw, h = BH, tone = NEUTRAL,
-                           dyn = () => S.auto ? "自动 开" : "自动 关", act = () => S.auto = !S.auto });
+                           dyn = () => S.auto ? "自动 开" : "自动 关",
+                           act = () => { S.auto = !S.auto; Say(S.auto ? "自动演示 开" : "自动演示 关"); } });
     }
 
     // ---------- 动作。三个都与网页版的 onclick 一一对应 ----------
@@ -104,19 +116,27 @@ public partial class PanelView : Node2D {
     static void Gift(int side, string key) {
         if (S.phase == Phase.Idle) Director.StartMatch();   // 点礼物自动开局
         Director.GiveGift(side, key);
+        var it = Shop.T[key];
+        /* 把注入量说出来。低档礼物（点赞 0.01、仙女棒 1）在火力条上根本看不出
+           动静 —— 火力条是开方的，1 点火力只占 1.8%，肉眼就是没动。没有这行字，
+           点了低档礼物会被读成"按钮坏了"。 */
+        Say($"{(side > 0 ? "查岗党" : "灭迹党")} 送出 {it.name}  火力 +{it.push:0.##}"
+          + $"  →  {S.fA:0}:{S.fB:0}");
     }
 
     static void ToggleMatch() {
-        if (S.phase == Phase.Idle) Director.StartMatch(); else Director.BackToIdle();
+        if (S.phase == Phase.Idle) { Director.StartMatch(); Say("开局"); }
+        else { Director.BackToIdle(); Say("回到调试台"); }
     }
 
     /* 只有 idle 下才准直接摆进度。这条守卫是网页版 nudge() 里就有的：开局之后
        进度只能由火力差推出来，否则"这件礼物到底推了多少"永远说不清 —— 手动
        摆过一次 p，后面所有读数都不能用了。 */
     static void Nudge(float d) {
-        if (S.phase != Phase.Idle) return;
+        if (S.phase != Phase.Idle) { Say("对局中不能手动摆进度，先『回到调试台』"); return; }
         S.auto = false;
         S.p = MathX.Clamp(S.p + d, 0f, 100f);
+        Say($"进度 → {S.p:0.0}");
     }
 
     // ---------- 输入 ----------
@@ -142,26 +162,33 @@ public partial class PanelView : Node2D {
                 case Key.Space: ToggleMatch();      return;
                 case Key.Left:  Nudge(-7f);         return;
                 case Key.Right: Nudge(+7f);         return;
-                case Key.L:     S.line = (S.line + 1) % 4; return;
-                case Key.A:     S.auto = !S.auto;   return;
+                case Key.L:     S.line = (S.line + 1) % 4; Say("对抗线档位 " + S.line); return;
+                case Key.A:     S.auto = !S.auto; Say(S.auto ? "自动演示 开" : "自动演示 关"); return;
             }
             return;
         }
         if (!Showing) return;
         if (e is InputEventMouseButton m && m.Pressed && m.ButtonIndex == MouseButton.Left) {
-            /* 直接用事件自带的 position，不再做任何变换。
-               真实鼠标事件在送进 _UnhandledInput 之前已经被 viewport 变换到画布
-               坐标系了（stretch=canvas_items 下 viewport 坐标就是 960x1334 这套），
-               再转一次就是转两遍 —— 窗口按 1:1 开时逆变换恰好是单位阵，这个错
-               不会暴露，一缩放就全偏（实测 865 被算成 1539）。
+            /* 事件带的是 **viewport 坐标**，要过 canvas transform 的逆才是画布坐标。
+               stretch=canvas_items 下 viewport 的实际尺寸就是窗口尺寸（540x750），
+               960x1334 那套画布坐标是被 canvas transform 缩放后画进去的 —— 截图
+               出来是 539x750 而不是 960x1334，就是这件事的直接证据。
 
-               Input.ParseInputEvent 注入的事件走的是同一条路、同样要过这一步，
-               所以 --click 那边给的必须是窗口坐标（见 Rebuild）。 */
+               ⚠ 别被"窗口按 1:1 开时不转也能命中"骗了：那时逆变换恰好是单位阵，
+               转不转都对。一缩放就全偏，而缩放才是默认（window_width_override=540）。
+               这一条只能用真实鼠标验证，--click 注入验不出来 —— 注入的事件是我
+               自己按同一个变换算出来的，两边一起错也一起对。 */
+            /* 事件带的 position 已经是画布坐标，直接用。
+               viewport 在分发之前会对它做一次 GetScreenTransform() 的逆变换
+               （实测：注入 865 收到 1538.85 = 865/0.5615），所以 960x1334 这套
+               坐标是现成的。别再套 canvas transform —— 那个管的是 Camera2D 一类
+               画布内变换，没有相机时是单位阵，套了不报错也不起作用，只会让人
+               以为这里已经处理过缩放了。 */
             var q = m.Position;
             int i = HitAt(q);
-            if (diag) GD.Print($"[click] 画布({q.X:0},{q.Y:0}) → 按钮 {i}"
-                             + (i >= 0 ? " " + (btns[i].dyn != null ? btns[i].dyn() : btns[i].label) : " 未命中"));
+            if (diag) GD.Print($"[click] 画布({q.X:0},{q.Y:0}) → 按钮 {i}");
             if (i >= 0) { btns[i].act(); down = i; downT = S.t; }
+            else Say($"点击({q.X:0},{q.Y:0}) 没落在任何按钮上");
         }
     }
 
@@ -187,12 +214,9 @@ public partial class PanelView : Node2D {
                 keyName = null;
             }
             if (clickAt.HasValue) {
-                /* 画布坐标 → 窗口坐标。注入的事件和真实鼠标一样要过 viewport 那一
-                   步变换，所以这里得先换算回去，否则缩放窗口下会偏（实测 865 被
-                   放大成 1539，落到面板外面）。
-                   换算必须用 GetScreenTransform() 而不是 GetCanvasTransform()：后者
-                   管的是 Camera2D 那类画布**内**的变换，与 stretch 缩放无关 ——
-                   实测它在 540x750 下就是单位阵，拿它换算等于没换算。 */
+                /* 画布坐标 → 窗口坐标。ParseInputEvent 把 position 原样送进输入
+                   管线，之后 viewport 照样会对它做 screenXf 的逆 —— 所以这里得先
+                   正着乘一次，两下抵消，接收端拿到的才是画布坐标。 */
                 var ev = new InputEventMouseButton {
                     ButtonIndex = MouseButton.Left, Pressed = true,
                     Position = GetViewport().GetScreenTransform() * clickAt.Value
@@ -230,6 +254,12 @@ public partial class PanelView : Node2D {
     /* 对应网页版底部那行 #stat。idle 与 play 显示的东西不一样 —— 调试台关心
        "现在摆在哪一格"，对局关心"两边火力差多少"。 */
     string Stat() {
+        // 事件回显留 6 秒，够看清刚才那一下到底有没有到、到了落在哪
+        string tail = (lastMsg != "" && S.t - lastMsgT < 6f) ? "   ◀ " + lastMsg : "";
+        return Head() + tail;
+    }
+
+    string Head() {
         if (S.phase == Phase.Idle)
             return $"调试台  p={S.p:0.0}  对抗线x={Director.FrontAt(FX.phoneY):0}  {Engine.GetFramesPerSecond()}fps"
                  + "   ·  [1-5]查岗党送礼  [Q-T]灭迹党  [空格]开局  [←→]±7  [L]对抗线  [F1]隐藏面板";
